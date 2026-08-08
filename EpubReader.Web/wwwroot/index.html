@@ -2,9 +2,20 @@
 <html lang="pl" class="h-full">
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="description" content="Czytnik EPUB w przeglądarce — lokalne pliki, spis treści, zakładki i motywy." />
+    <meta name="theme-color" content="#0f766e" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="WebEpub" />
+    <meta name="application-name" content="WebEpub" />
     <title>EPUB Reader Studio</title>
     <base href="/" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
     <link rel="preload" id="webassembly" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -42,21 +53,52 @@
     <link rel="stylesheet" href="css/reader.css" />
     <script type="importmap"></script>
 </head>
-<body class="h-full overflow-hidden">
+<body class="h-full overflow-hidden we-boot">
     <div id="app" class="h-full">
-        <svg class="loading-progress">
-            <circle r="40%" cx="50%" cy="50%" />
-            <circle r="40%" cx="50%" cy="50%" />
-        </svg>
-        <div class="loading-progress-text"></div>
+        <div class="we-splash" role="status" aria-live="polite" aria-label="Ładowanie WebEpub">
+            <div class="we-splash__aurora" aria-hidden="true"></div>
+            <div class="we-splash__grain" aria-hidden="true"></div>
+            <div class="we-splash__stage">
+                <div class="we-splash__book-wrap" aria-hidden="true">
+                    <svg class="we-splash__book" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path class="we-splash__page we-splash__page--left" d="M30 14.5C22 12 14 12 8 14.5V48c6.5-2.2 14.5-2.2 22 0V14.5Z" />
+                        <path class="we-splash__page we-splash__page--right" d="M34 14.5C42 12 50 12 56 14.5V48c-6.5-2.2-14.5-2.2-22 0V14.5Z" />
+                        <path class="we-splash__spine" d="M32 14.5V48" />
+                        <path class="we-splash__line" d="M14 24h10" />
+                        <path class="we-splash__line we-splash__line--2" d="M14 30h8" />
+                        <path class="we-splash__line we-splash__line--3" d="M14 36h11" />
+                        <path class="we-splash__line we-splash__line--r" d="M40 24h10" />
+                        <path class="we-splash__line we-splash__line--r2" d="M40 30h8" />
+                    </svg>
+                    <svg class="loading-progress we-splash__ring" viewBox="0 0 100 100" aria-hidden="true">
+                        <circle class="we-splash__ring-track" r="42" cx="50" cy="50" />
+                        <circle class="we-splash__ring-value" r="42" cx="50" cy="50" />
+                    </svg>
+                </div>
+                <div class="we-splash__brand">
+                    <span class="we-splash__name">WebEpub</span>
+                    <span class="we-splash__tag">EPUB Reader Studio</span>
+                </div>
+                <div class="we-splash__meter" aria-hidden="true">
+                    <div class="we-splash__meter-fill"></div>
+                </div>
+                <div class="loading-progress-text we-splash__status"></div>
+            </div>
+        </div>
     </div>
 
     <div id="blazor-error-ui">
-        An unhandled error has occurred.
-        <a href="." class="reload">Reload</a>
-        <span class="dismiss">🗙</span>
+        Coś poszło nie tak.
+        <a href="." class="reload">Odśwież</a>
+        <span class="dismiss" title="Zamknij">✕</span>
     </div>
     <script src="js/epub-reader.js"></script>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' })
+                .catch(function (err) { console.warn('SW registration failed', err); });
+        }
+    </script>
 </body>
 </html>

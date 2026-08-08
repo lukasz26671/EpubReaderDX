@@ -3,8 +3,8 @@
 @using EpubReader.Domain.Entities
 @implements IDisposable
 
-<aside class="toc-panel reader-border border-r flex flex-col transition-all duration-300 z-20 absolute inset-y-0 left-0 shadow-xl lg:shadow-none lg:relative @(State.IsSidebarOpen ? "translate-x-0 w-[min(22rem,90vw)]" : "-translate-x-full lg:w-0 lg:border-0 lg:overflow-hidden lg:p-0")">
-    <div class="flex flex-col flex-1 min-h-0 min-w-[min(22rem,90vw)]">
+<aside class="toc-panel reader-border border-r flex flex-col z-20 absolute inset-y-0 left-0 shadow-xl lg:shadow-none lg:relative @(State.IsSidebarOpen ? "is-open" : "is-closed")">
+    <div class="toc-panel__inner flex flex-col flex-1 min-h-0">
         <div class="p-4 reader-border border-b space-y-3 shrink-0">
             <div class="flex items-center justify-between">
                 <h2 class="font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
@@ -74,10 +74,9 @@
     </div>
 </aside>
 
-@if (State.IsSidebarOpen)
-{
-    <div class="lg:hidden absolute inset-0 z-10" style="background:rgba(0,0,0,0.4)" @onclick="() => State.SetSidebarOpen(false)"></div>
-}
+<div class="toc-backdrop lg:hidden absolute inset-0 z-10 @(State.IsSidebarOpen ? "is-visible" : null)"
+     style="background:rgba(0,0,0,0.4)"
+     @onclick="() => State.SetSidebarOpen(false)"></div>
 
 @code {
     private int _lastScrolledChapter = -1;

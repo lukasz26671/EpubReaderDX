@@ -181,18 +181,25 @@ jobs:
           VERSION_CODE: ${{ needs.version.outputs.version_code }}
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path artifacts/windows | Out-Null
+          New-Item -ItemType Directory -Force -Path artifacts/windows/app | Out-Null
 
+          # Avoid `-r win-x64` on multi-TFM MAUI projects (leaks RID into Android restore).
+          # UseMonoRuntime=false is required so restore does not seek Mono.win-x64 (NU1102).
           dotnet publish $env:PROJECT `
             -c Release `
             -f net10.0-windows10.0.19041.0 `
-            -r win-x64 `
             --self-contained true `
+            -p:RuntimeIdentifierOverride=win-x64 `
+            -p:UseMonoRuntime=false `
             -p:WindowsPackageType=None `
             -p:PublishSingleFile=false `
             -p:ApplicationDisplayVersion=$env:VERSION `
             -p:ApplicationVersion=$env:VERSION_CODE `
             -o artifacts/windows/app
+
+          if (-not (Get-ChildItem -Path artifacts/windows/app -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+            throw "Windows publish produced no files under artifacts/windows/app"
+          }
 
           $zip = "artifacts/windows/EpubReaderDX-$env:VERSION-win-x64.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }

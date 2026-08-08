@@ -1,17 +1,12 @@
 @inject IReaderStateService State
 @inject IJSRuntime Js
+@inject NavigationManager Nav
 @implements IAsyncDisposable
 
 <div class="@ReaderThemeCss.BodyClasses(State.Settings.Theme) @(State.IsFullscreenChromeHidden ? "chrome-hidden" : null)"
      id="app-body"
      data-theme="@ReaderThemeCss.ThemeAttribute(State.Settings.Theme)"
-     tabindex="0"
-     @ondragover:preventDefault="true"
-     @ondragenter:preventDefault="true"
-     @ondragover="OnDragOver"
-     @ondragleave="OnDragLeave"
-     @ondrop:preventDefault="true"
-     @ondrop="OnDrop">
+     tabindex="0">
 
     <header class="reader-chrome reader-border backdrop-blur border-b h-14 px-3 sm:px-4 flex items-center justify-between shrink-0 z-30 transition-all">
         <div class="flex items-center gap-2 min-w-0">
@@ -81,11 +76,13 @@
 @code {
     private DotNetObjectReference<ReaderApp>? _dotNetRef;
     private int _lastChapterIndex = -1;
+    private bool _launchHandled;
 
     protected override async Task OnInitializedAsync()
     {
         State.OnChange += HandleChange;
         await State.InitializeAsync();
+        await HandleLaunchIntentsAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -99,6 +96,8 @@
                 await Js.InvokeVoidAsync("epubReaderUi.focusApp");
             }
             catch { /* host JS may not be ready */ }
+
+            await TryOpenLaunchFileAsync();
         }
 
         if (State.HasBook && State.CurrentChapterIndex != _lastChapterIndex)
@@ -130,6 +129,90 @@
         }
     }
 
+    private async Task HandleLaunchIntentsAsync()
+    {
+        if (_launchHandled) return;
+        _launchHandled = true;
+
+        var action = GetQueryValue("action");
+        if (string.IsNullOrWhiteSpace(action)) return;
+
+        ClearLaunchQuery();
+
+        switch (action.Trim().ToLowerInvariant())
+        {
+            case "open":
+                await State.PickAndOpenAsync();
+                break;
+            case "toc":
+                State.CloseDrawers();
+                State.SetSidebarOpen(true);
+                break;
+            case "search":
+                State.CloseDrawers();
+                if (!State.IsSearchOpen) State.ToggleSearch();
+                break;
+            case "settings":
+            case "appearance":
+                State.CloseDrawers();
+                if (!State.IsSettingsOpen) State.ToggleSettings();
+                break;
+            case "bookmarks":
+                State.CloseDrawers();
+                if (!State.IsBookmarksOpen) State.ToggleBookmarks();
+                break;
+            case "demo":
+                await State.LoadSampleAsync();
+                break;
+        }
+    }
+
+    private async Task TryOpenLaunchFileAsync()
+    {
+        try
+        {
+            var json = await Js.InvokeAsync<string?>("epubReaderPwa.consumeLaunchFileJson");
+            if (string.IsNullOrWhiteSpace(json)) return;
+
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var base64 = root.TryGetProperty("base64", out var b) ? b.GetString() : null;
+            var name = root.TryGetProperty("name", out var n) ? n.GetString() : "book.epub";
+            if (string.IsNullOrWhiteSpace(base64)) return;
+
+            await State.OpenFromBase64Async(base64, name);
+        }
+        catch
+        {
+            // MAUI / non-PWA hosts omit epubReaderPwa
+        }
+    }
+
+    private string? GetQueryValue(string key)
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var query = uri.Query;
+        if (string.IsNullOrEmpty(query)) return null;
+
+        foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var pair = part.Split('=', 2);
+            var name = Uri.UnescapeDataString(pair[0]);
+            if (!string.Equals(name, key, StringComparison.OrdinalIgnoreCase)) continue;
+            return pair.Length > 1 ? Uri.UnescapeDataString(pair[1]) : string.Empty;
+        }
+
+        return null;
+    }
+
+    private void ClearLaunchQuery()
+    {
+        var relative = Nav.ToBaseRelativePath(Nav.Uri);
+        var cut = relative.IndexOfAny(['?', '#']);
+        if (cut >= 0) relative = relative[..cut];
+        Nav.NavigateTo(relative, replace: true);
+    }
+
     private void HandleChange()
     {
         _ = DismissStatusLaterAsync();
@@ -147,14 +230,32 @@
     private Task OpenEpub() => State.PickAndOpenAsync();
     private Task LoadSample() => State.LoadSampleAsync();
 
-    private void OnDragOver() => State.SetDropZoneVisible(true);
-    private void OnDragLeave() => State.SetDropZoneVisible(false);
+    [JSInvokable]
+    public Task OnDropZoneChanged(bool visible)
+    {
+        State.SetDropZoneVisible(visible);
+        return Task.CompletedTask;
+    }
 
-    private async Task OnDrop(DragEventArgs e)
+    [JSInvokable]
+    public async Task OnEpubDropped(string? json)
     {
         State.SetDropZoneVisible(false);
-        // Blazor WebView may not expose file bytes; fall back to picker.
-        await State.PickAndOpenAsync();
+        if (string.IsNullOrWhiteSpace(json)) return;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var base64 = root.TryGetProperty("base64", out var b) ? b.GetString() : null;
+            var name = root.TryGetProperty("name", out var n) ? n.GetString() : "book.epub";
+            if (string.IsNullOrWhiteSpace(base64)) return;
+            await State.OpenFromBase64Async(base64, name);
+        }
+        catch
+        {
+            // Malformed drop payload — ignore.
+        }
     }
 
     [JSInvokable]

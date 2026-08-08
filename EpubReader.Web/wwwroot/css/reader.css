@@ -179,6 +179,58 @@ body {
     border-color: var(--rs-border) !important;
 }
 
+.toc-panel {
+    --toc-width: min(22rem, 90vw);
+    width: var(--toc-width);
+    max-width: var(--toc-width);
+    overflow: hidden;
+    transform: translateX(0);
+    transition:
+        transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+        width 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+        max-width 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 0.28s ease;
+    will-change: transform, width;
+}
+
+.toc-panel__inner {
+    width: var(--toc-width);
+    min-width: var(--toc-width);
+    height: 100%;
+}
+
+.toc-panel.is-closed {
+    transform: translateX(-105%);
+    pointer-events: none;
+}
+
+@media (min-width: 1024px) {
+    .toc-panel.is-closed {
+        transform: translateX(0);
+        width: 0;
+        max-width: 0;
+        border-right-color: transparent !important;
+    }
+}
+
+.toc-backdrop {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.28s ease;
+}
+
+.toc-backdrop.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .toc-panel,
+    .toc-backdrop {
+        transition: none !important;
+    }
+}
+
 .reader-main {
     background: var(--rs-reader-bg);
     color: var(--rs-reader-text);
