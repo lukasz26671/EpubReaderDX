@@ -1,0 +1,70 @@
+@inject IReaderStateService State
+@implements IDisposable
+
+@if (State.IsSearchOpen)
+{
+    <div class="reader-drawer absolute top-2 right-2 sm:right-6 w-80 sm:w-96 border rounded-2xl shadow-2xl p-5 z-40 flex flex-col max-h-[85vh]">
+        <div class="flex justify-between items-center mb-3 pb-2 reader-border border-b">
+            <h3 class="font-bold text-sm flex items-center gap-2">
+                <i data-lucide="search" class="w-4 h-4" style="color:var(--rs-accent)"></i>
+                Wyszukiwanie w książce
+            </h3>
+            <button type="button" class="p-1 reader-muted reader-hover rounded" @onclick="() => State.ToggleSearch()">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+        </div>
+
+        <EditForm Model="_model" OnValidSubmit="RunSearch" class="flex gap-2 mb-3">
+            <InputText @bind-Value="_model.Query" placeholder="Wpisz frazę..." class="flex-1 reader-surface-2 reader-border border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2" />
+            <button type="submit" class="px-3 py-2 reader-accent-bg rounded-xl text-xs font-medium transition">Szukaj</button>
+        </EditForm>
+
+        <div class="flex-1 overflow-y-auto space-y-2 pr-1 text-xs">
+            @if (!State.HasBook)
+            {
+                <div class="text-center py-6 reader-muted">Najpierw załaduj książkę.</div>
+            }
+            else if (string.IsNullOrWhiteSpace(State.SearchQuery))
+            {
+                <div class="text-center py-6 reader-muted">Wpisz słowo kluczowe powyżej.</div>
+            }
+            else if (State.SearchResults.Count == 0)
+            {
+                <div class="text-center py-6 reader-muted">Brak wyników dla "@State.SearchQuery".</div>
+            }
+            else
+            {
+                @foreach (var hit in State.SearchResults)
+                {
+                    var chapterIndex = hit.ChapterIndex;
+                    <button type="button" class="w-full text-left p-2.5 reader-surface-2 rounded-xl reader-hover transition"
+                            @onclick="() => Jump(chapterIndex)">
+                        <p class="font-bold text-[11px] mb-1">@hit.Title</p>
+                        <p class="reader-muted leading-snug">...@hit.Excerpt...</p>
+                    </button>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private readonly SearchModel _model = new();
+
+    protected override void OnInitialized() => State.OnChange += HandleChange;
+    private void HandleChange() => InvokeAsync(StateHasChanged);
+    public void Dispose() => State.OnChange -= HandleChange;
+
+    private void RunSearch() => State.Search(_model.Query);
+
+    private void Jump(int chapterIndex)
+    {
+        State.GoToChapter(chapterIndex);
+        State.ToggleSearch();
+    }
+
+    private sealed class SearchModel
+    {
+        public string Query { get; set; } = string.Empty;
+    }
+}

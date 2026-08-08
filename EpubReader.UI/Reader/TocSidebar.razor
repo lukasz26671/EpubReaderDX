@@ -1,0 +1,169 @@
+@inject IReaderStateService State
+@inject IJSRuntime Js
+@using EpubReader.Domain.Entities
+@implements IDisposable
+
+<aside class="toc-panel reader-border border-r flex flex-col transition-all duration-300 z-20 absolute inset-y-0 left-0 shadow-xl lg:shadow-none lg:relative @(State.IsSidebarOpen ? "translate-x-0 w-[min(22rem,90vw)]" : "-translate-x-full lg:w-0 lg:border-0 lg:overflow-hidden lg:p-0")">
+    <div class="flex flex-col flex-1 min-h-0 min-w-[min(22rem,90vw)]">
+        <div class="p-4 reader-border border-b space-y-3 shrink-0">
+            <div class="flex items-center justify-between">
+                <h2 class="font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
+                    <i data-lucide="list-tree" class="w-4 h-4" style="color:var(--rs-accent)"></i>
+                    Spis Treści
+                </h2>
+                <button type="button" class="p-1.5 reader-muted reader-hover rounded-lg" @onclick="() => State.SetSidebarOpen(false)" title="Ukryj (T)">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="relative">
+                <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-2.5 reader-muted"></i>
+                <input type="search"
+                       value="@State.TocFilter"
+                       @oninput="OnFilter"
+                       placeholder="Filtruj rozdziały…"
+                       class="w-full pl-8 pr-3 py-2 rounded-xl reader-surface-2 reader-border border text-xs focus:outline-none focus:ring-2"
+                       style="color:var(--rs-text); --tw-ring-color:var(--rs-accent)" />
+            </div>
+            @if (State.HasBook)
+            {
+                <p class="text-[10px] reader-muted">@State.Book!.Chapters.Count rozdziałów · TOC @(CountToc(State.Book.TableOfContents))</p>
+            }
+        </div>
+
+        <div id="toc-scroll" class="flex-1 overflow-y-auto p-2 text-sm min-h-0">
+            @if (!State.HasBook)
+            {
+                <div class="text-center py-8 reader-muted text-xs px-4">
+                    Załaduj plik EPUB, aby zobaczyć nawigację.
+                </div>
+            }
+            else if (State.Book!.TableOfContents.Count > 0)
+            {
+                @foreach (var node in State.Book.TableOfContents)
+                {
+                    @RenderNode(node, 0)
+                }
+            }
+            else
+            {
+                @foreach (var chapter in FilteredChapters)
+                {
+                    var index = chapter.Index - 1;
+                    var isActive = index == State.CurrentChapterIndex;
+                    <button type="button"
+                            id="@(isActive ? "toc-active" : null)"
+                            data-toc-index="@index"
+                            class="w-full text-left px-3 py-2 rounded-xl text-xs transition flex items-center justify-between @(isActive ? "reader-toc-active" : "reader-hover")"
+                            @onclick="() => Navigate(index)">
+                        <span class="truncate pr-2">@chapter.Title</span>
+                        <span class="text-[10px] opacity-50">@chapter.Index</span>
+                    </button>
+                }
+            }
+        </div>
+
+        <div class="p-4 reader-border border-t reader-surface-2 shrink-0">
+            <div class="flex justify-between text-xs reader-muted mb-1.5 font-medium">
+                <span>Postęp</span>
+                <span>@State.ProgressPercent%</span>
+            </div>
+            <div class="w-full h-2 rounded-full overflow-hidden" style="background:var(--rs-border)">
+                <div class="h-full transition-all duration-300" style="@($"width:{State.ProgressPercent}%; background:var(--rs-accent)")"></div>
+            </div>
+        </div>
+    </div>
+</aside>
+
+@if (State.IsSidebarOpen)
+{
+    <div class="lg:hidden absolute inset-0 z-10" style="background:rgba(0,0,0,0.4)" @onclick="() => State.SetSidebarOpen(false)"></div>
+}
+
+@code {
+    private int _lastScrolledChapter = -1;
+
+    protected override void OnInitialized() => State.OnChange += HandleChange;
+
+    private void HandleChange() => InvokeAsync(StateHasChanged);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!State.HasBook) return;
+        if (_lastScrolledChapter == State.CurrentChapterIndex) return;
+        _lastScrolledChapter = State.CurrentChapterIndex;
+        try
+        {
+            await Task.Delay(20);
+            await Js.InvokeVoidAsync("epubReaderUi.scrollTocToActive", State.CurrentChapterIndex);
+        }
+        catch { }
+    }
+
+    public void Dispose() => State.OnChange -= HandleChange;
+
+    private ICollection<EpubChapter> FilteredChapters =>
+        State.Book is null
+            ? Array.Empty<EpubChapter>()
+            : string.IsNullOrWhiteSpace(State.TocFilter)
+                ? State.Book.Chapters
+                : State.Book.Chapters.Where(c => c.Title.Contains(State.TocFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private void OnFilter(ChangeEventArgs e) => State.SetTocFilter(e.Value?.ToString() ?? string.Empty);
+
+    private void Navigate(int index) => State.GoToChapter(index);
+
+    private bool NodeVisible(EpubTocNode node)
+    {
+        if (string.IsNullOrWhiteSpace(State.TocFilter)) return true;
+        if (node.Title.Contains(State.TocFilter, StringComparison.OrdinalIgnoreCase)) return true;
+        return node.Children.Any(NodeVisible);
+    }
+
+    private RenderFragment RenderNode(EpubTocNode node, int depth) => __builder =>
+    {
+        if (!NodeVisible(node)) return;
+        var hasChildren = node.Children.Count > 0;
+        var isActive = node.ChapterIndex == State.CurrentChapterIndex;
+        var pad = 12 + depth * 12;
+
+        <div class="mb-0.5">
+            @if (node.ChapterIndex is int idx)
+            {
+                <button type="button"
+                        id="@(isActive ? "toc-active" : null)"
+                        data-toc-index="@idx"
+                        class="w-full text-left py-2 pr-3 rounded-xl text-xs transition flex items-center justify-between @(isActive ? "reader-toc-active" : "reader-hover")"
+                        style="@($"padding-left:{pad}px")"
+                        @onclick="() => Navigate(idx)">
+                    <span class="truncate pr-2">@node.Title</span>
+                    <span class="text-[10px] opacity-50">@(idx + 1)</span>
+                </button>
+            }
+            else
+            {
+                <div class="py-1.5 pr-3 text-[11px] uppercase tracking-wide reader-muted font-semibold" style="@($"padding-left:{pad}px")">
+                    @node.Title
+                </div>
+            }
+
+            @if (hasChildren)
+            {
+                @foreach (var child in node.Children)
+                {
+                    @RenderNode(child, depth + 1)
+                }
+            }
+        </div>
+    };
+
+    private static int CountToc(List<EpubTocNode> nodes)
+    {
+        var count = 0;
+        foreach (var n in nodes)
+        {
+            count++;
+            count += CountToc(n.Children);
+        }
+        return count;
+    }
+}

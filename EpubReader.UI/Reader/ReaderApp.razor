@@ -1,0 +1,254 @@
+@inject IReaderStateService State
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<div class="@ReaderThemeCss.BodyClasses(State.Settings.Theme) @(State.IsFullscreenChromeHidden ? "chrome-hidden" : null)"
+     id="app-body"
+     data-theme="@ReaderThemeCss.ThemeAttribute(State.Settings.Theme)"
+     tabindex="0"
+     @ondragover:preventDefault="true"
+     @ondragenter:preventDefault="true"
+     @ondragover="OnDragOver"
+     @ondragleave="OnDragLeave"
+     @ondrop:preventDefault="true"
+     @ondrop="OnDrop">
+
+    <header class="reader-chrome reader-border backdrop-blur border-b h-14 px-3 sm:px-4 flex items-center justify-between shrink-0 z-30 transition-all">
+        <div class="flex items-center gap-2 min-w-0">
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="Spis treści (T)" @onclick="() => State.ToggleSidebar()">
+                <i data-lucide="menu" class="w-5 h-5"></i>
+            </button>
+            <div class="flex items-center gap-2 min-w-0">
+                <span class="font-bold text-lg flex items-center gap-1.5 shrink-0" style="color:var(--rs-accent)">
+                    <i data-lucide="book-open" class="w-5 h-5"></i>
+                    <span class="hidden sm:inline tracking-tight">WebEpub</span>
+                </span>
+                <span class="hidden sm:inline opacity-30">|</span>
+                <h1 class="font-semibold truncate text-sm">
+                    @(State.Book?.Metadata.Title ?? "Nie załadowano książki")
+                </h1>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-1 sm:gap-1.5">
+            <button type="button" class="flex items-center gap-1.5 px-3 py-1.5 reader-accent-bg rounded-lg text-xs sm:text-sm font-medium transition shadow-sm" title="Otwórz EPUB (Ctrl+O)" @onclick="OpenEpub">
+                <i data-lucide="upload" class="w-4 h-4"></i>
+                <span class="hidden md:inline">Otwórz</span>
+            </button>
+            <button type="button" class="px-2.5 py-1.5 reader-surface-2 reader-hover rounded-lg text-xs font-medium transition flex items-center gap-1" title="Demo" @onclick="LoadSample">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500"></i>
+                <span class="hidden lg:inline">Demo</span>
+            </button>
+            <div class="h-5 w-px mx-0.5" style="background:var(--rs-border)"></div>
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="Wygląd" @onclick="() => State.ToggleSettings()">
+                <i data-lucide="sliders" class="w-5 h-5"></i>
+            </button>
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="Szukaj (/)" @onclick="() => State.ToggleSearch()">
+                <i data-lucide="search" class="w-5 h-5"></i>
+            </button>
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition relative" title="Zakładki (B)" @onclick="() => State.ToggleBookmarks()">
+                <i data-lucide="bookmark" class="w-5 h-5"></i>
+                @if (State.Bookmarks.Count > 0)
+                {
+                    <span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style="background:var(--rs-accent)"></span>
+                }
+            </button>
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="Info" @onclick="() => State.ToggleMetadata()">
+                <i data-lucide="info" class="w-5 h-5"></i>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex-1 flex min-h-0 relative">
+        <TocSidebar />
+        <ReaderViewport />
+        <SettingsDrawer />
+        <SearchDrawer />
+        <BookmarksDrawer />
+        <MetadataModal />
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(State.StatusMessage) && !State.IsLoading)
+    {
+        <div class="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-full bg-slate-900/90 text-white text-xs shadow-lg">
+            @State.StatusMessage
+        </div>
+    }
+
+    <LucideRefresh />
+</div>
+
+@code {
+    private DotNetObjectReference<ReaderApp>? _dotNetRef;
+    private int _lastChapterIndex = -1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.OnChange += HandleChange;
+        await State.InitializeAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            try
+            {
+                await Js.InvokeVoidAsync("epubReaderUi.bind", _dotNetRef);
+                await Js.InvokeVoidAsync("epubReaderUi.focusApp");
+            }
+            catch { /* host JS may not be ready */ }
+        }
+
+        if (State.HasBook && State.CurrentChapterIndex != _lastChapterIndex)
+        {
+            _lastChapterIndex = State.CurrentChapterIndex;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(State.PendingScrollFragment))
+                {
+                    await Task.Delay(30);
+                    await Js.InvokeVoidAsync("epubReaderUi.scrollToFragment", State.PendingScrollFragment);
+                    State.ClearPendingScrollFragment();
+                }
+                else
+                {
+                    await Js.InvokeVoidAsync("epubReaderUi.scrollReaderTop");
+                }
+            }
+            catch { }
+        }
+        else if (!string.IsNullOrWhiteSpace(State.PendingScrollFragment))
+        {
+            try
+            {
+                await Js.InvokeVoidAsync("epubReaderUi.scrollToFragment", State.PendingScrollFragment);
+                State.ClearPendingScrollFragment();
+            }
+            catch { }
+        }
+    }
+
+    private void HandleChange()
+    {
+        _ = DismissStatusLaterAsync();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DismissStatusLaterAsync()
+    {
+        var message = State.StatusMessage;
+        if (string.IsNullOrWhiteSpace(message) || State.IsLoading) return;
+        await Task.Delay(2200);
+        if (State.StatusMessage == message) State.ClearStatus();
+    }
+
+    private Task OpenEpub() => State.PickAndOpenAsync();
+    private Task LoadSample() => State.LoadSampleAsync();
+
+    private void OnDragOver() => State.SetDropZoneVisible(true);
+    private void OnDragLeave() => State.SetDropZoneVisible(false);
+
+    private async Task OnDrop(DragEventArgs e)
+    {
+        State.SetDropZoneVisible(false);
+        // Blazor WebView may not expose file bytes; fall back to picker.
+        await State.PickAndOpenAsync();
+    }
+
+    [JSInvokable]
+    public Task OnContentLinkClicked(string? href, string? basePath) =>
+        State.HandleContentLinkAsync(href, basePath);
+
+    [JSInvokable]
+    public async Task OnHotkey(string key)
+    {
+        switch (key)
+        {
+            case "ArrowRight":
+            case "n":
+            case "N":
+                State.NextChapter();
+                break;
+            case "ArrowLeft":
+            case "p":
+            case "P":
+                State.PreviousChapter();
+                break;
+            case "j":
+            case "J":
+            case "PageDown":
+                await PageOrNext(1);
+                break;
+            case "k":
+            case "K":
+            case "PageUp":
+                await PageOrNext(-1);
+                break;
+            case "Escape":
+                State.CloseDrawers();
+                break;
+            case "t":
+            case "T":
+                State.ToggleSidebar();
+                break;
+            case "b":
+            case "B":
+                await State.ToggleCurrentBookmarkAsync();
+                break;
+            case "Search":
+                State.ToggleSearch();
+                break;
+            case "Open":
+                await State.PickAndOpenAsync();
+                break;
+            case "FontUp":
+                await State.AdjustFontSizeAsync(1);
+                break;
+            case "FontDown":
+                await State.AdjustFontSizeAsync(-1);
+                break;
+            case "f":
+            case "F":
+                State.ToggleChrome();
+                break;
+            case "i":
+            case "I":
+                State.ToggleMetadata();
+                break;
+            case "s":
+            case "S":
+                State.ToggleSettings();
+                break;
+            case "Home":
+                State.GoToChapter(0);
+                break;
+            case "End":
+                if (State.Book is not null) State.GoToChapter(State.Book.Chapters.Count - 1);
+                break;
+        }
+    }
+
+    private async Task PageOrNext(int direction)
+    {
+        try
+        {
+            var result = await Js.InvokeAsync<string>("epubReaderUi.pageScroll", direction);
+            if (result == "end" && direction > 0) State.NextChapter();
+            else if (result == "start" && direction < 0) State.PreviousChapter();
+        }
+        catch
+        {
+            if (direction > 0) State.NextChapter();
+            else State.PreviousChapter();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.OnChange -= HandleChange;
+        try { await Js.InvokeVoidAsync("epubReaderUi.unbind"); } catch { }
+        _dotNetRef?.Dispose();
+    }
+}

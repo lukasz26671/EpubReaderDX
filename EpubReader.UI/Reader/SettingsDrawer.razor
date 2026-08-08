@@ -1,0 +1,187 @@
+@inject IReaderStateService State
+@using EpubReader.Domain.Enums
+@using EpubReader.Domain.Entities
+@implements IDisposable
+
+@if (State.IsSettingsOpen)
+{
+    <div class="reader-drawer absolute top-2 right-2 sm:right-6 w-[22rem] sm:w-96 border rounded-2xl shadow-2xl p-5 z-40 transition-all">
+        <div class="flex justify-between items-center mb-3 pb-2 reader-border border-b">
+            <h3 class="font-bold text-sm flex items-center gap-2">
+                <i data-lucide="palette" class="w-4 h-4" style="color:var(--rs-accent)"></i>
+                Ustawienia Czytnika
+            </h3>
+            <button type="button" class="p-1 reader-muted reader-hover rounded" @onclick="() => State.ToggleSettings()">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+        </div>
+
+        <div class="settings-scroll space-y-5 text-xs">
+            <div>
+                <label class="block font-medium reader-muted mb-2">Motyw</label>
+                <div class="grid grid-cols-5 gap-1.5">
+                    @foreach (ReaderTheme theme in Enum.GetValues<ReaderTheme>())
+                    {
+                        var meta = ReaderThemeCss.ThemeMeta(theme);
+                        var active = State.Settings.Theme == theme;
+                        <button type="button" class="theme-swatch-btn @(active ? "is-active" : null)" title="@meta.Label" @onclick="() => SetTheme(theme)">
+                            <span class="theme-swatch-dot" style="@($"background:{meta.Swatch}; box-shadow: inset 0 0 0 2px {meta.Accent}")"></span>
+                            <span>@meta.Label</span>
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <div>
+                <label class="block font-medium reader-muted mb-2">Czcionka</label>
+                <div class="grid grid-cols-2 gap-2">
+                    @foreach (FontFamilyOption font in Enum.GetValues<FontFamilyOption>())
+                    {
+                        var meta = ReaderThemeCss.FontMeta(font);
+                        <button type="button"
+                                class="@FontButtonClass(font)"
+                                style="@($"{FontButtonClassStyle(font)}; font-family:{ReaderThemeCss.FontStack(font)}")"
+                                @onclick="() => SetFont(font)">
+                            <span class="text-base leading-none">@meta.Sample</span>
+                            <span>@meta.Label</span>
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <div>
+                <div class="flex justify-between mb-1">
+                    <label class="font-medium reader-muted">Rozmiar tekstu</label>
+                    <span class="reader-muted">@State.Settings.FontSize px</span>
+                </div>
+                <input type="range" min="12" max="40" value="@State.Settings.FontSize" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnFontSizeInput" />
+            </div>
+
+            <div>
+                <div class="flex justify-between mb-1">
+                    <label class="font-medium reader-muted">Interlinia</label>
+                    <span class="reader-muted">@State.Settings.LineHeight.ToString("0.0")</span>
+                </div>
+                <input type="range" min="1.1" max="2.8" step="0.1" value="@State.Settings.LineHeight.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnLineHeightInput" />
+            </div>
+
+            <div>
+                <div class="flex justify-between mb-1">
+                    <label class="font-medium reader-muted">Odstępy liter</label>
+                    <span class="reader-muted">@State.Settings.LetterSpacing.ToString("0.00") em</span>
+                </div>
+                <input type="range" min="-0.05" max="0.2" step="0.01" value="@State.Settings.LetterSpacing.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnLetterSpacingInput" />
+            </div>
+
+            <div>
+                <div class="flex justify-between mb-1">
+                    <label class="font-medium reader-muted">Odstęp akapitów</label>
+                    <span class="reader-muted">@State.Settings.ParagraphSpacing.ToString("0.0")</span>
+                </div>
+                <input type="range" min="0.4" max="2.5" step="0.1" value="@State.Settings.ParagraphSpacing.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnParagraphSpacingInput" />
+            </div>
+
+            <div>
+                <label class="block font-medium reader-muted mb-2">Wyrównanie</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <button type="button" class="@AlignClass(TextAlignOption.Left)" style="@AlignStyle(TextAlignOption.Left)" @onclick="() => SetAlign(TextAlignOption.Left)">Do lewej</button>
+                    <button type="button" class="@AlignClass(TextAlignOption.Justify)" style="@AlignStyle(TextAlignOption.Justify)" @onclick="() => SetAlign(TextAlignOption.Justify)">Justuj</button>
+                    <button type="button" class="@AlignClass(TextAlignOption.Center)" style="@AlignStyle(TextAlignOption.Center)" @onclick="() => SetAlign(TextAlignOption.Center)">Środek</button>
+                </div>
+            </div>
+
+            <div>
+                <div class="flex justify-between mb-1">
+                    <label class="font-medium reader-muted">Szerokość kolumny</label>
+                    <span class="reader-muted">@State.Settings.ContentWidth rem</span>
+                </div>
+                <input type="range" min="28" max="60" value="@State.Settings.ContentWidth" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnWidthInput" />
+            </div>
+
+            <div>
+                <div class="flex justify-between mb-1">
+                    <label class="font-medium reader-muted">Margines strony</label>
+                    <span class="reader-muted">@State.Settings.PageMargin px</span>
+                </div>
+                <input type="range" min="8" max="48" value="@State.Settings.PageMargin" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnMarginInput" />
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    protected override void OnInitialized() => State.OnChange += HandleChange;
+    private void HandleChange() => InvokeAsync(StateHasChanged);
+    public void Dispose() => State.OnChange -= HandleChange;
+
+    private Task SetTheme(ReaderTheme theme)
+    {
+        var s = CloneSettings();
+        s.Theme = theme;
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private Task SetFont(FontFamilyOption font)
+    {
+        var s = CloneSettings();
+        s.FontFamily = font;
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private Task SetAlign(TextAlignOption align)
+    {
+        var s = CloneSettings();
+        s.TextAlign = align;
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private string FontButtonClass(FontFamilyOption font) =>
+        State.Settings.FontFamily == font
+            ? "p-2 border-2 rounded-xl text-xs font-medium transition flex flex-col items-center gap-1"
+            : "p-2 border rounded-xl text-xs font-medium reader-surface-2 reader-hover transition flex flex-col items-center gap-1";
+
+    private string AlignClass(TextAlignOption align) =>
+        State.Settings.TextAlign == align
+            ? "p-2 rounded-xl border-2 font-medium"
+            : "p-2 rounded-xl border reader-surface-2 reader-hover";
+
+    private string AlignStyle(TextAlignOption align) =>
+        State.Settings.TextAlign == align
+            ? "border-color:var(--rs-accent); background:var(--rs-active); color:var(--rs-active-text)"
+            : "border-color:var(--rs-border)";
+
+    private string FontButtonClassStyle(FontFamilyOption font) =>
+        State.Settings.FontFamily == font
+            ? "border-color:var(--rs-accent); background:var(--rs-active); color:var(--rs-active-text)"
+            : "border-color:var(--rs-border)";
+
+    private Task OnFontSizeInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.FontSize = (int)v);
+    private Task OnLineHeightInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.LineHeight = v);
+    private Task OnLetterSpacingInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.LetterSpacing = v);
+    private Task OnParagraphSpacingInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.ParagraphSpacing = v);
+    private Task OnWidthInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.ContentWidth = (int)v);
+    private Task OnMarginInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.PageMargin = (int)v);
+
+    private Task UpdateNumber(ChangeEventArgs e, Action<ReaderSettings, double> apply)
+    {
+        var s = CloneSettings();
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v))
+        {
+            apply(s, v);
+        }
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private ReaderSettings CloneSettings() => new()
+    {
+        Theme = State.Settings.Theme,
+        FontFamily = State.Settings.FontFamily,
+        FontSize = State.Settings.FontSize,
+        LineHeight = State.Settings.LineHeight,
+        LetterSpacing = State.Settings.LetterSpacing,
+        ParagraphSpacing = State.Settings.ParagraphSpacing,
+        TextAlign = State.Settings.TextAlign,
+        ContentWidth = State.Settings.ContentWidth,
+        PageMargin = State.Settings.PageMargin
+    };
+}

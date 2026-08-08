@@ -1,0 +1,114 @@
+@inject IReaderStateService State
+@implements IDisposable
+
+<main class="reader-main flex-1 flex flex-col relative overflow-hidden transition-colors">
+    @if (State.IsDropZoneVisible)
+    {
+        <div class="absolute inset-0 backdrop-blur-sm border-4 border-dashed z-50 flex flex-col items-center justify-center" style="background:color-mix(in srgb, var(--rs-accent) 12%, transparent); border-color:var(--rs-accent); color:var(--rs-accent)">
+            <i data-lucide="file-up" class="w-16 h-16 mb-4 animate-bounce"></i>
+            <p class="text-xl font-bold">Upuść plik EPUB tutaj</p>
+        </div>
+    }
+
+    @if (State.IsLoading)
+    {
+        <div class="flex-1 flex flex-col items-center justify-center gap-3 reader-muted text-sm">
+            <div class="w-10 h-10 border-2 border-t-transparent rounded-full animate-spin" style="border-color:var(--rs-accent); border-top-color:transparent"></div>
+            <p>@(State.StatusMessage ?? "Ładowanie EPUB…")</p>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(State.ErrorMessage))
+    {
+        <div class="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
+            <p class="text-red-600 text-sm max-w-md">@State.ErrorMessage</p>
+            <button type="button" class="px-4 py-2 reader-accent-bg rounded-lg text-sm" @onclick="OpenEpub">Spróbuj ponownie</button>
+        </div>
+    }
+    else if (!State.HasBook)
+    {
+        <div class="flex-1 flex flex-col items-center justify-center p-6 text-center z-10 max-w-lg mx-auto">
+            <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-6 shadow-inner" style="background:var(--rs-active); color:var(--rs-accent)">
+                <i data-lucide="book-open-check" class="w-10 h-10"></i>
+            </div>
+            <h2 class="text-2xl font-bold mb-2">Gotowy do czytania</h2>
+            <p class="reader-muted text-sm mb-6 leading-relaxed">
+                Otwórz EPUB, przeciągnij plik na okno albo uruchom demo. Skróty: <kbd class="kbd">Ctrl+O</kbd> otwórz, <kbd class="kbd">T</kbd> spis, <kbd class="kbd">/</kbd> szukaj.
+            </p>
+            <div class="flex flex-wrap justify-center gap-3 w-full">
+                <button type="button" class="px-5 py-2.5 reader-accent-bg rounded-xl font-medium transition shadow-md flex items-center gap-2" @onclick="OpenEpub">
+                    <i data-lucide="upload" class="w-4 h-4"></i>
+                    Wybierz plik EPUB
+                </button>
+                <button type="button" class="px-5 py-2.5 reader-surface-2 reader-hover rounded-xl font-medium transition flex items-center gap-2" @onclick="LoadSample">
+                    <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i>
+                    Wypróbuj Demo
+                </button>
+            </div>
+        </div>
+    }
+    else if (State.CurrentChapter is not null)
+    {
+        var chapter = State.CurrentChapter;
+        var pad = $"padding-left:max(1rem, var(--reader-page-margin)); padding-right:max(1rem, var(--reader-page-margin));";
+        <div id="reader-scroll" class="flex-1 overflow-y-auto py-6 scroll-smooth" style="@pad" @onclick="OnReaderClick">
+            <div class="reader-column mx-auto min-h-full flex flex-col justify-between pb-8">
+                <div class="reader-border border-b pb-4 mb-6 flex items-center justify-between gap-3 text-xs reader-muted">
+                    <div class="min-w-0">
+                        <p class="truncate font-medium" style="color:var(--rs-text)">@chapter.Title</p>
+                        <p class="text-[10px] mt-0.5 opacity-70">@(State.CurrentChapterIndex + 1) / @State.Book!.Chapters.Count · @State.ProgressPercent%</p>
+                    </div>
+                    <button type="button"
+                            class="shrink-0 transition flex items-center gap-1 @(State.IsCurrentChapterBookmarked ? "text-amber-500 font-medium" : "reader-hover reader-muted")"
+                            @onclick="ToggleBookmark"
+                            @onclick:stopPropagation="true">
+                        <i data-lucide="bookmark" class="w-4 h-4"></i>
+                        <span>Zakładka</span>
+                    </button>
+                </div>
+
+                <article id="reader-content"
+                         class="reader-prose prose max-w-none transition-all"
+                         style="@ReaderThemeCss.ReaderContentStyle(State.Settings)">
+                    @if (!string.IsNullOrWhiteSpace(State.Book?.BundledCss))
+                    {
+                        <style>@((MarkupString)State.Book!.BundledCss)</style>
+                    }
+                    @((MarkupString)(string.IsNullOrWhiteSpace(chapter.DisplayHtml) ? chapter.RawHtml : chapter.DisplayHtml))
+                </article>
+
+                <div class="mt-12 pt-6 reader-border border-t flex items-center justify-between gap-3">
+                    <button type="button" class="px-4 py-2 reader-surface-2 reader-hover rounded-lg text-sm font-medium transition flex items-center gap-2 disabled:opacity-40"
+                            disabled="@(State.CurrentChapterIndex == 0)" @onclick="() => State.PreviousChapter()" @onclick:stopPropagation="true">
+                        <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                        Poprzedni
+                    </button>
+                    <div class="flex items-center gap-2">
+                        <button type="button" class="p-2 rounded-lg reader-hover reader-muted" title="Zmniejsz czcionkę" @onclick="() => State.AdjustFontSizeAsync(-1)" @onclick:stopPropagation="true">
+                            <i data-lucide="minus" class="w-4 h-4"></i>
+                        </button>
+                        <span class="text-xs reader-muted font-medium tabular-nums">@(State.CurrentChapterIndex + 1) / @State.Book!.Chapters.Count</span>
+                        <button type="button" class="p-2 rounded-lg reader-hover reader-muted" title="Zwiększ czcionkę" @onclick="() => State.AdjustFontSizeAsync(1)" @onclick:stopPropagation="true">
+                            <i data-lucide="plus" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    <button type="button" class="px-4 py-2 reader-accent-bg rounded-lg text-sm font-medium transition flex items-center gap-2 disabled:opacity-40"
+                            disabled="@(State.CurrentChapterIndex >= State.Book.Chapters.Count - 1)" @onclick="() => State.NextChapter()" @onclick:stopPropagation="true">
+                        Następny
+                        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+</main>
+
+@code {
+    protected override void OnInitialized() => State.OnChange += HandleChange;
+    private void HandleChange() => InvokeAsync(StateHasChanged);
+    public void Dispose() => State.OnChange -= HandleChange;
+
+    private Task OpenEpub() => State.PickAndOpenAsync();
+    private Task LoadSample() => State.LoadSampleAsync();
+    private Task ToggleBookmark() => State.ToggleCurrentBookmarkAsync();
+    private void OnReaderClick() { }
+}

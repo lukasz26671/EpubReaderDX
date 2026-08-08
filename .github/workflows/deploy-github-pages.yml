@@ -1,0 +1,85 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish Blazor WASM
+        run: |
+          dotnet publish EpubReader.Web/EpubReader.Web.csproj \
+            -c Release \
+            -o artifacts/web
+
+      - name: Prepare GitHub Pages site
+        shell: bash
+        run: |
+          set -euo pipefail
+          SITE_DIR="artifacts/web/wwwroot"
+          REPO_NAME="${{ github.event.repository.name }}"
+          OWNER="${{ github.repository_owner }}"
+          BASE_HREF="/${REPO_NAME}/"
+          if [ "${REPO_NAME}" = "${OWNER}.github.io" ]; then
+            BASE_HREF="/"
+          fi
+
+          echo "Using base href: ${BASE_HREF}"
+
+          # Rewrite <base href="..."> for project-site path
+          python3 - "$SITE_DIR/index.html" "$BASE_HREF" <<'PY'
+          import re, sys
+          path, base = sys.argv[1], sys.argv[2]
+          text = open(path, encoding="utf-8").read()
+          text2, n = re.subn(r'(<base\s+href=["\'])[^"\']*(["\']\s*/?>)', rf'\1{base}\2', text, count=1, flags=re.I)
+          if n != 1:
+              raise SystemExit(f"Failed to rewrite base href in {path}")
+          open(path, "w", encoding="utf-8").write(text2)
+          print(f"Updated base href to {base}")
+          PY
+
+          # Jekyll must not process _framework
+          touch "$SITE_DIR/.nojekyll"
+
+          # SPA fallback for client-side routes
+          cp "$SITE_DIR/index.html" "$SITE_DIR/404.html"
+
+          echo "---- index.html base tag ----"
+          grep -n 'base href' "$SITE_DIR/index.html"
+          ls -la "$SITE_DIR" | head
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: artifacts/web/wwwroot
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

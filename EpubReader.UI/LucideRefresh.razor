@@ -1,0 +1,15 @@
+@inject IJSRuntime Js
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("epubReaderUi.createIcons");
+        }
+        catch
+        {
+            // Host may not have Lucide loaded yet during first paint.
+        }
+    }
+}

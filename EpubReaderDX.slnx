@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="EpubReader.Application/EpubReader.Application.csproj" />
+  <Project Path="EpubReader.Domain/EpubReader.Domain.csproj" />
+  <Project Path="EpubReader.Infrastructure/EpubReader.Infrastructure.csproj" />
+  <Project Path="EpubReader.UI/EpubReader.UI.csproj" />
+  <Project Path="EpubReader.Web/EpubReader.Web.csproj" />
+  <Project Path="EpubReaderDX/EpubReaderDX.csproj" />
+</Solution>
