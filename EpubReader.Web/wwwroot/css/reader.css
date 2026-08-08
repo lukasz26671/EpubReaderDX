@@ -236,6 +236,11 @@ body {
     color: var(--rs-reader-text);
 }
 
+#reader-scroll {
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+}
+
 .reader-muted { color: var(--rs-muted); }
 .reader-border { border-color: var(--rs-border) !important; }
 .reader-surface-2 { background: var(--rs-surface-2); }
@@ -310,12 +315,23 @@ body {
 }
 
 .chrome-hidden .reader-chrome {
-    transform: translateY(-100%);
+    transform: translateY(calc(-100% - var(--safe-top, 0px)));
     opacity: 0;
     pointer-events: none;
     height: 0 !important;
+    min-height: 0 !important;
+    padding-top: 0 !important;
     border: 0 !important;
     overflow: hidden;
+}
+
+.chrome-hidden {
+    /* Keep content clear of Dynamic Island when chrome is tucked away */
+    padding-top: var(--safe-top);
+}
+
+.we-status-toast {
+    bottom: calc(1rem + var(--safe-bottom, 0px));
 }
 
 #reader-content {
@@ -394,6 +410,44 @@ body {
 
 #app, #app > div { height: 100%; }
 .status-bar-safe-area { display: none; }
+
+/* Safe areas: Dynamic Island / notch / home indicator (esp. installed PWA) */
+:root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+}
+
+#app-body {
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    padding-bottom: var(--safe-bottom);
+    box-sizing: border-box;
+}
+
+.reader-chrome {
+    padding-top: var(--safe-top);
+    min-height: calc(3.5rem + var(--safe-top));
+    height: auto;
+    box-sizing: border-box;
+}
+
+/* Installed PWA / fullscreen: slightly extra top breathing room past the island */
+@media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
+    :root {
+        --safe-top: max(env(safe-area-inset-top, 0px), 12px);
+    }
+}
+
+@supports (-webkit-touch-callout: none) {
+    @media (display-mode: standalone) {
+        :root {
+            /* iOS home-screen web apps sometimes under-report inset near the island */
+            --safe-top: max(env(safe-area-inset-top, 0px), 47px);
+        }
+    }
+}
 
 .search-highlight {
     background-color: #fef08a;

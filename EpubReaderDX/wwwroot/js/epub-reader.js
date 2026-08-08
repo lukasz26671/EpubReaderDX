@@ -129,8 +129,13 @@ window.epubReaderUi = {
     _dragEnterHandler: null,
     _dragLeaveHandler: null,
     _dropHandler: null,
+    _touchStartHandler: null,
+    _touchMoveHandler: null,
+    _touchEndHandler: null,
+    _touchCancelHandler: null,
     _dragDepth: 0,
     _scrollTimer: null,
+    _touch: null,
 
     createIcons: function () {
         if (window.lucide && typeof window.lucide.createIcons === 'function') {
@@ -227,10 +232,27 @@ window.epubReaderUi = {
         return false;
     },
 
+    _hotkey: function (payload) {
+        if (!window.epubReaderUi._dotNetRef) return;
+        window.epubReaderUi._dotNetRef.invokeMethodAsync('OnHotkey', payload);
+    },
+
+    _touchIgnoreTarget: function (target) {
+        if (!target || !target.closest) return true;
+        return !!target.closest(
+            'input, textarea, select, button, a, label, .reader-drawer, .reader-modal-card, .settings-scroll, [contenteditable="true"]'
+        );
+    },
+
+    _resetTouch: function () {
+        this._touch = null;
+    },
+
     bind: function (dotNetRef) {
         this.unbind();
         this._dotNetRef = dotNetRef;
         this._dragDepth = 0;
+        this._touch = null;
 
         this._clickHandler = function (e) {
             var a = e.target && e.target.closest ? e.target.closest('a[data-epub-href]') : null;
@@ -319,6 +341,85 @@ window.epubReaderUi = {
         window.addEventListener('dragover', this._dragOverHandler, true);
         window.addEventListener('dragleave', this._dragLeaveHandler, true);
         window.addEventListener('drop', this._dropHandler, true);
+
+        this._touchStartHandler = function (e) {
+            if (!e.touches || e.touches.length !== 1) {
+                window.epubReaderUi._resetTouch();
+                return;
+            }
+            if (window.epubReaderUi._touchIgnoreTarget(e.target)) {
+                window.epubReaderUi._resetTouch();
+                return;
+            }
+            var t = e.touches[0];
+            var inToc = !!(e.target.closest && e.target.closest('.toc-panel'));
+            var onBackdrop = !!(e.target.closest && e.target.closest('.toc-backdrop'));
+            window.epubReaderUi._touch = {
+                x: t.clientX,
+                y: t.clientY,
+                time: Date.now(),
+                inToc: inToc,
+                onBackdrop: onBackdrop,
+                edge: t.clientX <= 28,
+                axis: null
+            };
+        };
+
+        this._touchMoveHandler = function (e) {
+            var state = window.epubReaderUi._touch;
+            if (!state || !e.touches || e.touches.length !== 1) return;
+            var t = e.touches[0];
+            var dx = t.clientX - state.x;
+            var dy = t.clientY - state.y;
+            if (!state.axis) {
+                if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+                state.axis = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'x' : 'y';
+            }
+            // Only claim horizontal edge/TOC swipes so vertical reading scroll stays native.
+            if (state.axis === 'x' && (state.edge || state.inToc || state.onBackdrop) && e.cancelable) {
+                e.preventDefault();
+            }
+        };
+
+        this._touchEndHandler = function (e) {
+            var state = window.epubReaderUi._touch;
+            window.epubReaderUi._resetTouch();
+            if (!state || !e.changedTouches || !e.changedTouches.length) return;
+
+            var t = e.changedTouches[0];
+            var dx = t.clientX - state.x;
+            var dy = t.clientY - state.y;
+            var dt = Date.now() - state.time;
+            var absX = Math.abs(dx);
+            var absY = Math.abs(dy);
+
+            if (dt > 900) return;
+            if (absX < 56) return;
+            if (absX < absY * 1.25) return;
+
+            if (state.edge && dx > 48) {
+                window.epubReaderUi._hotkey('SwipeTocOpen');
+                return;
+            }
+            if ((state.inToc || state.onBackdrop) && dx < -48) {
+                window.epubReaderUi._hotkey('SwipeTocClose');
+                return;
+            }
+            if (state.inToc || state.onBackdrop) return;
+
+            if (dx < 0) window.epubReaderUi._hotkey('SwipeNext');
+            else window.epubReaderUi._hotkey('SwipePrev');
+        };
+
+        this._touchCancelHandler = function () {
+            window.epubReaderUi._resetTouch();
+        };
+
+        var touchOpts = { capture: true, passive: false };
+        document.addEventListener('touchstart', this._touchStartHandler, touchOpts);
+        document.addEventListener('touchmove', this._touchMoveHandler, touchOpts);
+        document.addEventListener('touchend', this._touchEndHandler, touchOpts);
+        document.addEventListener('touchcancel', this._touchCancelHandler, touchOpts);
     },
 
     unbind: function () {
@@ -346,7 +447,25 @@ window.epubReaderUi = {
             window.removeEventListener('drop', this._dropHandler, true);
             this._dropHandler = null;
         }
+        var touchOpts = { capture: true };
+        if (this._touchStartHandler) {
+            document.removeEventListener('touchstart', this._touchStartHandler, touchOpts);
+            this._touchStartHandler = null;
+        }
+        if (this._touchMoveHandler) {
+            document.removeEventListener('touchmove', this._touchMoveHandler, touchOpts);
+            this._touchMoveHandler = null;
+        }
+        if (this._touchEndHandler) {
+            document.removeEventListener('touchend', this._touchEndHandler, touchOpts);
+            this._touchEndHandler = null;
+        }
+        if (this._touchCancelHandler) {
+            document.removeEventListener('touchcancel', this._touchCancelHandler, touchOpts);
+            this._touchCancelHandler = null;
+        }
         this._dragDepth = 0;
+        this._touch = null;
         if (this._dotNetRef) {
             this._dotNetRef = null;
         }

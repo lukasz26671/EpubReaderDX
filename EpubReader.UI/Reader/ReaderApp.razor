@@ -8,7 +8,7 @@
      data-theme="@ReaderThemeCss.ThemeAttribute(State.Settings.Theme)"
      tabindex="0">
 
-    <header class="reader-chrome reader-border backdrop-blur border-b h-14 px-3 sm:px-4 flex items-center justify-between shrink-0 z-30 transition-all">
+    <header class="reader-chrome reader-border backdrop-blur border-b min-h-14 px-3 sm:px-4 flex items-center justify-between shrink-0 z-30 transition-all box-border">
         <div class="flex items-center gap-2 min-w-0">
             <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="Spis treści (T)" @onclick="() => State.ToggleSidebar()">
                 <i data-lucide="menu" class="w-5 h-5"></i>
@@ -65,7 +65,7 @@
 
     @if (!string.IsNullOrWhiteSpace(State.StatusMessage) && !State.IsLoading)
     {
-        <div class="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-full bg-slate-900/90 text-white text-xs shadow-lg">
+        <div class="pointer-events-none absolute left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-full bg-slate-900/90 text-white text-xs shadow-lg we-status-toast">
             @State.StatusMessage
         </div>
     }
@@ -286,6 +286,19 @@
             case "K":
             case "PageUp":
                 await PageOrNext(-1);
+                break;
+            case "SwipeNext":
+                await PageOrNext(1);
+                break;
+            case "SwipePrev":
+                await PageOrNext(-1);
+                break;
+            case "SwipeTocOpen":
+                State.CloseDrawers();
+                State.SetSidebarOpen(true);
+                break;
+            case "SwipeTocClose":
+                State.SetSidebarOpen(false);
                 break;
             case "Escape":
                 State.CloseDrawers();
