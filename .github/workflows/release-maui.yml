@@ -30,37 +30,54 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       version_code: ${{ steps.meta.outputs.version_code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - id: meta
         shell: bash
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version || '' }}
         run: |
           set -euo pipefail
+
+          # Parse MAJOR.MINOR.PATCH; last field must not absorb leftover dotted parts
+          # (bash assigns remainder of the line to the final read variable).
+          parse_semver() {
+            local raw="${1#v}"
+            local major minor patch
+            IFS='.' read -r major minor patch _ <<<"${raw}.0.0.0"
+            major="${major:-0}"
+            minor="${minor:-0}"
+            patch="${patch:-0}"
+            major="${major%%[^0-9]*}"
+            minor="${minor%%[^0-9]*}"
+            patch="${patch%%[^0-9]*}"
+            major="${major:-0}"
+            minor="${minor:-0}"
+            patch="${patch:-0}"
+            printf '%s %s %s' "$major" "$minor" "$patch"
+          }
+
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             TAG="${GITHUB_REF_NAME}"
             VERSION="${TAG#v}"
-          elif [[ -n "${{ inputs.version }}" ]]; then
-            VERSION="${{ inputs.version }}"
-            VERSION="${VERSION#v}"
+          elif [[ -n "${VERSION_INPUT}" ]]; then
+            VERSION="${VERSION_INPUT#v}"
             TAG="v${VERSION}"
           else
             LATEST="$(git describe --tags --abbrev=0 2>/dev/null || true)"
             if [[ -z "${LATEST}" ]]; then
               VERSION="1.0.0"
             else
-              BASE="${LATEST#v}"
-              IFS='.' read -r MAJOR MINOR PATCH <<<"${BASE}.0.0"
-              PATCH="${PATCH:-0}"
+              read -r MAJOR MINOR PATCH <<<"$(parse_semver "${LATEST}")"
               VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
             fi
             TAG="v${VERSION}"
           fi
 
           # Android versionCode: 1.2.3 -> 10203
-          IFS='.' read -r A B C <<<"${VERSION}.0.0"
-          A="${A:-0}"; B="${B:-0}"; C="${C:-0}"
+          read -r A B C <<<"$(parse_semver "${VERSION}")"
           VERSION_CODE=$((A * 10000 + B * 100 + C))
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -72,10 +89,10 @@ jobs:
     needs: version
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -83,7 +100,7 @@ jobs:
         run: dotnet workload install maui-android --skip-manifest-update
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -135,7 +152,7 @@ jobs:
           Write-Host "APK: $dest ($([math]::Round($apk.Length/1MB,2)) MB)"
 
       - name: Upload Android artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: android-apk
           path: artifacts/android/EpubReaderDX-*-android.apk
@@ -145,10 +162,10 @@ jobs:
     needs: version
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -183,7 +200,7 @@ jobs:
           Write-Host "ZIP: $zip"
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: windows-zip
           path: artifacts/windows/EpubReaderDX-*-win-x64.zip
@@ -193,12 +210,12 @@ jobs:
     needs: [version, build-android, build-windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist
 
