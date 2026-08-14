@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using EpubReader.Application.Interfaces;
 
 namespace EpubReader.Application.Services;
@@ -67,6 +68,256 @@ public sealed class LanguageDetector : ILanguageDetector
             return RefineChineseVariant(fromMeta, sample);
 
         return fromText ?? "en";
+    }
+
+    private static readonly HashSet<string> EnCue =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "why", "what", "who", "where", "when", "how", "the", "this", "these", "those",
+            "is", "are", "was", "were", "have", "has", "will", "would", "could", "should",
+            "hello", "thanks", "please", "because", "they", "them", "their", "yeah", "wow",
+            "don't", "can't", "it's", "i'm", "you're", "we're", "isn't", "aren't", "that's",
+            "what's", "with", "from", "your", "his", "her", "our", "english", "okay", "yes",
+            "hello", "hey", "please", "thanks"
+        };
+
+    private static readonly HashSet<string> PlCue =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "tak", "nie", "się", "jest", "są", "był", "była", "było", "byli", "że", "czy",
+            "jak", "ale", "tego", "tej", "tym", "będzie", "mogę", "może", "mogą", "już",
+            "jeszcze", "bardzo", "tylko", "też", "przez", "również", "więc", "ponieważ",
+            "które", "który", "która", "których", "proszę", "dziękuję", "cześć", "dzień",
+            "polski", "polska", "lubię", "chcę", "gdzie", "kiedy", "dlaczego"
+        };
+
+    private static readonly HashSet<string> DeCue =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "und", "der", "die", "das", "ich", "nicht", "ist", "sind", "warum", "bitte",
+            "danke", "ein", "eine", "nicht", "sie", "wir", "nicht"
+        };
+
+    private static readonly HashSet<string> EsCue =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "que", "los", "las", "una", "por", "para", "está", "son", "porque", "gracias",
+            "hola", "está", "están", "también"
+        };
+
+    private static readonly HashSet<string> FrCue =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "les", "une", "des", "est", "sont", "pas", "pour", "dans", "que", "qui",
+            "merci", "pourquoi", "bonjour", "avec", "mais"
+        };
+
+    public string DetectLocal(string? text, string fallback)
+    {
+        var sample = (text ?? string.Empty).Trim();
+        if (sample.Length == 0) return fallback;
+
+        var script = DetectSnippetScript(sample);
+        if (script is not null && IsStrongScript(script))
+            return script;
+
+        if (script == "pl")
+            return "pl";
+
+        var (best, bestScore, secondScore) = ScoreCueWords(sample);
+        var words = CountWords(sample);
+        var letters = CountLetters(sample);
+
+        // Whole-snippet cues: "Why" / "tak" are obvious; "no" is PL filler and EN negation → keep fallback.
+        if (words <= 3 || letters <= 16)
+        {
+            if (IsAmbiguousShort(sample))
+                return fallback;
+            if (best is not null && bestScore >= 1 && bestScore > secondScore)
+                return best;
+            return fallback;
+        }
+
+        if (best is not null && bestScore >= 1 && bestScore > secondScore)
+            return best;
+
+        return script ?? fallback;
+    }
+
+    public IReadOnlyList<(string Text, string Language)> LabelUtterances(
+        IReadOnlyList<string> chunks,
+        string fallback)
+    {
+        if (chunks.Count == 0) return [];
+        var fb = string.IsNullOrWhiteSpace(fallback) ? "en" : fallback;
+        var result = new List<(string, string)>();
+
+        foreach (var chunk in chunks)
+        {
+            var pieces = SplitSpeakable(chunk);
+            string? runLang = null;
+            var run = new List<string>();
+
+            void Flush()
+            {
+                if (run.Count == 0 || runLang is null) return;
+                result.Add((string.Join(" ", run).Trim(), runLang));
+                run.Clear();
+            }
+
+            foreach (var piece in pieces)
+            {
+                var lang = DetectLocal(piece, fb);
+                if (runLang is null)
+                {
+                    runLang = lang;
+                    run.Add(piece);
+                    continue;
+                }
+
+                if (lang == runLang)
+                {
+                    run.Add(piece);
+                    continue;
+                }
+
+                Flush();
+                runLang = lang;
+                run.Add(piece);
+            }
+
+            Flush();
+        }
+
+        return result;
+    }
+
+    private static bool IsAmbiguousShort(string sample)
+    {
+        var t = sample.Trim().TrimEnd('.', '!', '?', '…', '"', '\'', '”', '“').Trim();
+        return t.Equals("no", StringComparison.OrdinalIgnoreCase)
+            || t.Equals("ok", StringComparison.OrdinalIgnoreCase)
+            || t.Equals("a", StringComparison.OrdinalIgnoreCase)
+            || t.Equals("i", StringComparison.OrdinalIgnoreCase)
+            || t.Equals("to", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> SplitSpeakable(string text)
+    {
+        var t = text.Trim();
+        if (t.Length == 0) yield break;
+
+        var paras = Regex.Split(t, @"\n\s*\n+");
+        foreach (var para in paras)
+        {
+            var p = para.Trim();
+            if (p.Length == 0) continue;
+            var sentences = SentenceCueSplit.Split(p)
+                .Select(x => x.Trim())
+                .Where(x => x.Length > 0)
+                .ToList();
+            if (sentences.Count == 0)
+            {
+                yield return p;
+                continue;
+            }
+
+            foreach (var s in sentences)
+                yield return s;
+        }
+    }
+
+    private static readonly Regex SentenceCueSplit = new(
+        @"(?<=[.!?…。！？])\s+",
+        RegexOptions.Compiled);
+
+    private static readonly Regex WordSplit = new(
+        @"[^\p{L}]+",
+        RegexOptions.Compiled);
+
+    private static (string? Best, int BestScore, int SecondScore) ScoreCueWords(string sample)
+    {
+        var scores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in WordSplit.Split(sample))
+        {
+            if (raw.Length < 2) continue;
+            var w = raw;
+            if (EnCue.Contains(w)) scores["en"] = scores.GetValueOrDefault("en") + 1;
+            if (PlCue.Contains(w)) scores["pl"] = scores.GetValueOrDefault("pl") + 1;
+            if (DeCue.Contains(w)) scores["de"] = scores.GetValueOrDefault("de") + 1;
+            if (EsCue.Contains(w)) scores["es"] = scores.GetValueOrDefault("es") + 1;
+            if (FrCue.Contains(w)) scores["fr"] = scores.GetValueOrDefault("fr") + 1;
+        }
+
+        string? best = null;
+        var bestScore = 0;
+        var second = 0;
+        foreach (var (lang, n) in scores)
+        {
+            if (n > bestScore)
+            {
+                second = bestScore;
+                bestScore = n;
+                best = lang;
+            }
+            else if (n > second)
+            {
+                second = n;
+            }
+        }
+
+        return (best, bestScore, second);
+    }
+
+    private static int CountWords(string sample) =>
+        WordSplit.Split(sample).Count(w => w.Length > 0);
+
+    private static int CountLetters(string sample)
+    {
+        var n = 0;
+        foreach (var r in sample.EnumerateRunes())
+            if (Rune.IsLetter(r)) n++;
+        return n;
+    }
+
+    /// <summary>Relaxed script detect for short snippets (1 CJK char is enough).</summary>
+    private static string? DetectSnippetScript(string sample)
+    {
+        var han = 0;
+        var hiraKata = 0;
+        var hangul = 0;
+        var cyrillic = 0;
+        var arabic = 0;
+        var latin = 0;
+        var polish = 0;
+        var letters = 0;
+
+        foreach (var rune in sample.EnumerateRunes())
+        {
+            var v = rune.Value;
+            if (IsHan(v)) { han++; letters++; continue; }
+            if (IsHiraganaOrKatakana(v)) { hiraKata++; letters++; continue; }
+            if (IsHangul(v)) { hangul++; letters++; continue; }
+            if (IsCyrillic(v)) { cyrillic++; letters++; continue; }
+            if (IsArabic(v)) { arabic++; letters++; continue; }
+            if (Rune.IsLetter(rune))
+            {
+                letters++;
+                latin++;
+                var ch = rune.ToString();
+                if ("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ".Contains(ch, StringComparison.Ordinal))
+                    polish++;
+            }
+        }
+
+        if (letters == 0) return null;
+        if (hiraKata > 0) return "ja";
+        if (hangul > 0) return "ko";
+        if (han > 0 && hiraKata == 0 && hangul == 0) return DetectChineseVariant(sample);
+        if (cyrillic > 0 && cyrillic >= latin) return "ru";
+        if (arabic > 0 && arabic >= latin) return "ar";
+        if (polish >= 1) return "pl";
+        return null;
     }
 
     private static string? DetectFromText(string sample)

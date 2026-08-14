@@ -124,9 +124,32 @@ public sealed class TtsController : ITtsController
             lang = "en";
             DetectedLanguage = lang;
         }
+        var perChunkAuto = string.IsNullOrWhiteSpace(languageOverride)
+            && engine.Kind != TtsEngineKind.Piper;
+
+        IReadOnlyList<string> speakTexts = chunks;
+        IReadOnlyList<string> speakLangs;
+        if (perChunkAuto)
+        {
+            var labeled = _languageDetector.LabelUtterances(chunks, lang);
+            if (labeled.Count == 0)
+            {
+                StatusMessage = _l.T("tts.noText");
+                Notify();
+                return;
+            }
+
+            speakTexts = labeled.Select(x => x.Text).ToList();
+            speakLangs = labeled.Select(x => x.Language).ToList();
+        }
+        else
+        {
+            speakLangs = Enumerable.Repeat(lang, chunks.Count).ToList();
+        }
+
         _edgeFellBack = false;
-        ChunkCount = chunks.Count;
-        CurrentChunkIndex = Math.Clamp(startChunkIndex, 0, chunks.Count - 1);
+        ChunkCount = speakTexts.Count;
+        CurrentChunkIndex = Math.Clamp(startChunkIndex, 0, speakTexts.Count - 1);
         StatusMessage = string.IsNullOrWhiteSpace(note)
             ? _l.T("tts.playing", engine.DisplayName, lang)
             : note;
@@ -141,7 +164,7 @@ public sealed class TtsController : ITtsController
 
         try
         {
-            await PlayChunksAsync(engine, chunks, lang, cts.Token, CurrentChunkIndex);
+            await PlayChunksAsync(engine, speakTexts, speakLangs, cts.Token, CurrentChunkIndex);
             if (!cts.IsCancellationRequested)
                 StatusMessage = _l.T("tts.done");
         }
@@ -170,7 +193,7 @@ public sealed class TtsController : ITtsController
                         var piperChunks = TtsTextChunker.Chunk(plainText, 700);
                         ChunkCount = piperChunks.Count;
                         CurrentChunkIndex = Math.Clamp(startChunkIndex, 0, Math.Max(0, piperChunks.Count - 1));
-                        await PlayChunksAsync(piper, piperChunks, lang, cts.Token, CurrentChunkIndex);
+                        await PlayChunksAsync(piper, piperChunks, Enumerable.Repeat("en", piperChunks.Count).ToList(), cts.Token, CurrentChunkIndex);
                         if (!cts.IsCancellationRequested)
                             StatusMessage = _l.T("tts.done");
                         return;
@@ -193,9 +216,23 @@ public sealed class TtsController : ITtsController
                     try
                     {
                         var systemChunks = TtsTextChunker.Chunk(plainText, 240);
-                        ChunkCount = systemChunks.Count;
-                        CurrentChunkIndex = Math.Clamp(startChunkIndex, 0, Math.Max(0, systemChunks.Count - 1));
-                        await PlayChunksAsync(system, systemChunks, lang, cts.Token, CurrentChunkIndex);
+                        IReadOnlyList<string> sysTexts;
+                        IReadOnlyList<string> sysLangs;
+                        if (string.IsNullOrWhiteSpace(languageOverride))
+                        {
+                            var labeled = _languageDetector.LabelUtterances(systemChunks, lang);
+                            sysTexts = labeled.Select(x => x.Text).ToList();
+                            sysLangs = labeled.Select(x => x.Language).ToList();
+                        }
+                        else
+                        {
+                            sysTexts = systemChunks;
+                            sysLangs = Enumerable.Repeat(lang, systemChunks.Count).ToList();
+                        }
+
+                        ChunkCount = sysTexts.Count;
+                        CurrentChunkIndex = Math.Clamp(startChunkIndex, 0, Math.Max(0, sysTexts.Count - 1));
+                        await PlayChunksAsync(system, sysTexts, sysLangs, cts.Token, CurrentChunkIndex);
                         if (!cts.IsCancellationRequested)
                             StatusMessage = _l.T("tts.done");
                     }
@@ -244,7 +281,7 @@ public sealed class TtsController : ITtsController
     private async Task PlayChunksAsync(
         ITtsEngine engine,
         IReadOnlyList<string> chunks,
-        string lang,
+        IReadOnlyList<string> langs,
         CancellationToken ct,
         int startIndex = 0)
     {
@@ -255,16 +292,22 @@ public sealed class TtsController : ITtsController
             Interlocked.Exchange(ref _nav, 0);
 
             var start = i;
-            var slice = chunks.Skip(start).ToList();
+            var runLang = i < langs.Count ? langs[i] : langs.LastOrDefault() ?? "en";
+            var runEnd = start + 1;
+            while (runEnd < chunks.Count && runEnd < langs.Count && langs[runEnd] == runLang)
+                runEnd++;
+
+            var slice = chunks.Skip(start).Take(runEnd - start).ToList();
 
             using var queueCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             lock (_gate) { _queueCts = queueCts; }
 
             try
             {
+                DetectedLanguage = runLang;
                 await engine.SpeakQueueAsync(
                     slice,
-                    lang,
+                    runLang,
                     _rate,
                     async (local, token) =>
                     {
@@ -278,7 +321,8 @@ public sealed class TtsController : ITtsController
                                 : ActiveEngine == TtsEngineKind.Piper
                                     ? _l.T("tts.enginePiper")
                                     : _l.T("tts.engineSystem");
-                        StatusMessage = _l.T("tts.chunkProgress", engineLabel, global + 1, chunks.Count);
+                        StatusMessage = _l.T("tts.chunkProgress", engineLabel, global + 1, chunks.Count)
+                            + " · " + runLang;
                         Notify();
                         await HighlightAsync(chunks[global]);
                     },
@@ -306,7 +350,7 @@ public sealed class TtsController : ITtsController
             else if (nav == 2)
                 i = CurrentChunkIndex; // rate change — replay current
             else
-                break; // natural completion of remaining queue
+                i = runEnd; // this language run finished — next language or done
         }
     }
 
