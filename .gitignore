@@ -52,3 +52,6 @@ Thumbs.db
 appsettings.*.local.json
 .env
 .env.*
+
+# Local tooling (Edge TTS proxy, etc. — not for GitHub)
+tools/

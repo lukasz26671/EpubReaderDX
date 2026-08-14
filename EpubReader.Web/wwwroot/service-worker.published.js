@@ -5,6 +5,10 @@ self.importScripts('./service-worker-assets.js');
 self.addEventListener('install', event => event.waitUntil(onInstall(event)));
 self.addEventListener('activate', event => event.waitUntil(onActivate(event)));
 self.addEventListener('fetch', event => event.respondWith(onFetch(event)));
+self.addEventListener('message', event => {
+    if (event.data && event.data.type === 'SKIP_WAITING')
+        self.skipWaiting();
+});
 
 const cacheNamePrefix = 'offline-cache-';
 const cacheName = `${cacheNamePrefix}${self.assetsManifest.version}`;
@@ -17,7 +21,9 @@ const manifestUrlList = self.assetsManifest.assets
     .map(asset => new URL(asset.url, baseUrl).href);
 
 async function onInstall(event) {
-    console.info('Service worker: Install');
+    console.info('Service worker: Install', self.assetsManifest.version);
+    // Activate updated SW ASAP so fingerprinted CSS/JS aren't stuck behind the old cache.
+    self.skipWaiting();
 
     const assetsRequests = self.assetsManifest.assets
         .filter(asset => offlineAssetsInclude.some(pattern => pattern.test(asset.url)))
@@ -43,7 +49,8 @@ async function onInstall(event) {
 }
 
 async function onActivate(event) {
-    console.info('Service worker: Activate');
+    console.info('Service worker: Activate', self.assetsManifest.version);
+    await self.clients.claim();
     const cacheKeys = await caches.keys();
     await Promise.all(cacheKeys
         .filter(key => key.startsWith(cacheNamePrefix) && key !== cacheName)
@@ -51,17 +58,44 @@ async function onActivate(event) {
 }
 
 async function onFetch(event) {
-    let cachedResponse = null;
-    if (event.request.method === 'GET') {
-        const shouldServeIndexHtml = event.request.mode === 'navigate'
-            && !manifestUrlList.some(url => url === event.request.url);
+    if (event.request.method !== 'GET')
+        return fetch(event.request);
 
-        const request = shouldServeIndexHtml
-            ? new Request(new URL('index.html', baseUrl))
-            : event.request;
-        const cache = await caches.open(cacheName);
-        cachedResponse = await cache.match(request);
+    const url = new URL(event.request.url);
+    const isNavigate = event.request.mode === 'navigate'
+        || !manifestUrlList.some(u => u === event.request.url);
+    const isHtmlCssJs = /\.(html|css|js)$/i.test(url.pathname)
+        || url.pathname.endsWith('/')
+        || isNavigate;
+
+    // Network-first for HTML/CSS/JS so deploys aren't stuck on stale cache.
+    // Fingerprinted framework/wasm assets stay cache-first (URL changes on update).
+    if (isHtmlCssJs) {
+        try {
+            const networkResponse = await fetch(event.request, { cache: 'no-cache' });
+            if (networkResponse && networkResponse.ok) {
+                const cache = await caches.open(cacheName);
+                const request = (event.request.mode === 'navigate'
+                    && !manifestUrlList.some(u => u === event.request.url))
+                    ? new Request(new URL('index.html', baseUrl))
+                    : event.request;
+                try { await cache.put(request, networkResponse.clone()); } catch { /* ignore */ }
+                return networkResponse;
+            }
+        } catch {
+            // fall through to cache
+        }
     }
+
+    let cachedResponse = null;
+    const shouldServeIndexHtml = event.request.mode === 'navigate'
+        && !manifestUrlList.some(u => u === event.request.url);
+
+    const request = shouldServeIndexHtml
+        ? new Request(new URL('index.html', baseUrl))
+        : event.request;
+    const cache = await caches.open(cacheName);
+    cachedResponse = await cache.match(request);
 
     if (cachedResponse && cachedResponse.redirected) {
         const clonedResponse = cachedResponse.clone();

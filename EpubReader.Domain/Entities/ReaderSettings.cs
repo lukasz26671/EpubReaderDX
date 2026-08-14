@@ -18,6 +18,8 @@ public class ReaderSettings
     public double TtsRate { get; set; } = 1.0;
     /// <summary>BCP-47 override; null/empty = auto-detect.</summary>
     public string? TtsLanguageOverride { get; set; }
+    /// <summary>Piper voice id, e.g. en_US-lessac-high. Null = default.</summary>
+    public string? PiperVoiceId { get; set; }
 
     public UiLanguageKind UiLanguage { get; set; } = UiLanguageKind.Auto;
 }

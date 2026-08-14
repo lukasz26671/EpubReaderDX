@@ -49,8 +49,8 @@
             }
         };
     </script>
-    <link rel="stylesheet" href="css/app.css" />
-    <link rel="stylesheet" href="css/reader.css" />
+    <link rel="stylesheet" href="css/app#[.{fingerprint}].css" />
+    <link rel="stylesheet" href="css/reader#[.{fingerprint}].css" />
     <script type="importmap"></script>
 </head>
 <body class="h-full overflow-hidden we-boot">
@@ -92,12 +92,32 @@
         <a href="." class="reload">Odśwież</a>
         <span class="dismiss" title="Zamknij">✕</span>
     </div>
-    <script src="js/epub-reader.js"></script>
+    <script src="js/epub-reader#[.{fingerprint}].js"></script>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
     <script>
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' })
+                .then(function (reg) {
+                    reg.update();
+                    setInterval(function () { reg.update(); }, 60 * 60 * 1000);
+                    // Apply a waiting worker immediately after deploy.
+                    if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    reg.addEventListener('updatefound', function () {
+                        var w = reg.installing;
+                        if (!w) return;
+                        w.addEventListener('statechange', function () {
+                            if (w.state === 'installed' && navigator.serviceWorker.controller)
+                                w.postMessage({ type: 'SKIP_WAITING' });
+                        });
+                    });
+                })
                 .catch(function (err) { console.warn('SW registration failed', err); });
+            var refreshing = false;
+            navigator.serviceWorker.addEventListener('controllerchange', function () {
+                if (refreshing) return;
+                refreshing = true;
+                location.reload();
+            });
         }
     </script>
 </body>

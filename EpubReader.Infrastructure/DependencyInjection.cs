@@ -24,6 +24,7 @@ public static class DependencyInjection
         services.AddSingleton<IUriLauncher, BrowserUriLauncher>();
         services.AddSingleton<ISystemLocaleProvider, BrowserSystemLocaleProvider>();
         services.AddSingleton<ITtsEngine, SystemTtsEngine>();
+        // Browser WASM cannot open Edge WebSockets (Origin locked). Uses HTTP proxy — see EdgeTtsProxyConfig.
         services.AddSingleton<ITtsEngine, EdgeNeuralTtsEngine>();
         return services;
     }

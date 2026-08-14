@@ -11,6 +11,7 @@ public sealed class TtsController : ITtsController
     private readonly IAppLocalizer _l;
     private readonly IJsRuntimeAccessor _js;
     private readonly IReadOnlyDictionary<TtsEngineKind, ITtsEngine> _engines;
+    private readonly IPiperVoiceService? _piper;
     private CancellationTokenSource? _playCts;
     private CancellationTokenSource? _queueCts;
     private readonly object _gate = new();
@@ -23,12 +24,27 @@ public sealed class TtsController : ITtsController
         ILanguageDetector languageDetector,
         IAppLocalizer localizer,
         IJsRuntimeAccessor js,
-        IEnumerable<ITtsEngine> engines)
+        IEnumerable<ITtsEngine> engines,
+        IEnumerable<IPiperVoiceService> piperVoices)
     {
         _languageDetector = languageDetector;
         _l = localizer;
         _js = js;
         _engines = engines.ToDictionary(e => e.Kind);
+        _piper = piperVoices.FirstOrDefault();
+        if (_piper is not null)
+            _piper.OnChange += HandlePiperStatus;
+    }
+
+    private void HandlePiperStatus()
+    {
+        if (!IsSpeaking && string.IsNullOrEmpty(StatusMessage)) return;
+        if (_piper is null) return;
+        if (_piper.Phase is PiperPrepPhase.DownloadingRuntime or PiperPrepPhase.DownloadingVoice or PiperPrepPhase.Extracting)
+        {
+            StatusMessage = _piper.StatusMessage ?? _l.T("tts.piperPreparing");
+            Notify();
+        }
     }
 
     public bool IsSpeaking { get; private set; }
@@ -63,13 +79,24 @@ public sealed class TtsController : ITtsController
         var lang = string.IsNullOrWhiteSpace(languageOverride)
             ? _languageDetector.Detect(metadataLanguage, plainText)
             : languageOverride.Trim();
+
+        // Piper is English-only — do not overwrite the saved language preference.
+        if (preferredEngine == TtsEngineKind.Piper)
+            lang = "en";
+
         DetectedLanguage = lang;
 
         _rate = Math.Clamp(rate, 0.5, 2.0);
         // Sentence-sized chunks: highlight matches speech; speakQueue keeps playback smooth.
-        // Edge: larger packs = fewer WebSocket round-trips (worked reliably before).
+        // Edge/Piper: larger packs = fewer synth round-trips.
         // System: smaller sentence packs for highlight + speakQueue.
-        var chunks = TtsTextChunker.Chunk(plainText, preferredEngine == TtsEngineKind.System ? 240 : 900);
+        var chunkSize = preferredEngine switch
+        {
+            TtsEngineKind.System => 240,
+            TtsEngineKind.Piper => 700,
+            _ => 900
+        };
+        var chunks = TtsTextChunker.Chunk(plainText, chunkSize);
         if (chunks.Count == 0)
         {
             StatusMessage = _l.T("tts.noText");
@@ -86,6 +113,11 @@ public sealed class TtsController : ITtsController
         }
 
         ActiveEngine = engine.Kind;
+        if (engine.Kind == TtsEngineKind.Piper)
+        {
+            lang = "en";
+            DetectedLanguage = lang;
+        }
         _edgeFellBack = false;
         ChunkCount = chunks.Count;
         CurrentChunkIndex = 0;
@@ -113,29 +145,63 @@ public sealed class TtsController : ITtsController
         }
         catch (Exception ex)
         {
-            // Edge failed → optional one-shot system fallback (Auto / Edge preference).
+            // Edge failed → Piper (offline EN) → System
             if (engine.Kind == TtsEngineKind.EdgeNeural
-                && preferredEngine != TtsEngineKind.System
-                && _engines.TryGetValue(TtsEngineKind.System, out var system))
+                && preferredEngine != TtsEngineKind.System)
             {
-                _edgeFellBack = true;
-                StatusMessage = _l.T("tts.edgeFallback") + " · " + ex.Message;
-                ActiveEngine = TtsEngineKind.System;
-                Notify();
-                await Task.Delay(900, CancellationToken.None);
-                try
+                if (preferredEngine != TtsEngineKind.Piper
+                    && _engines.TryGetValue(TtsEngineKind.Piper, out var piper))
                 {
-                    var systemChunks = TtsTextChunker.Chunk(plainText, 240);
-                    ChunkCount = systemChunks.Count;
-                    CurrentChunkIndex = 0;
-                    await PlayChunksAsync(system, systemChunks, lang, cts.Token);
-                    if (!cts.IsCancellationRequested)
-                        StatusMessage = _l.T("tts.done");
+                    try
+                    {
+                        StatusMessage = _l.T("tts.piperFallback") + " · " + ex.Message;
+                        ActiveEngine = TtsEngineKind.Piper;
+                        lang = "en";
+                        DetectedLanguage = lang;
+                        _edgeFellBack = false;
+                        Notify();
+                        await Task.Delay(600, CancellationToken.None);
+                        var piperChunks = TtsTextChunker.Chunk(plainText, 700);
+                        ChunkCount = piperChunks.Count;
+                        CurrentChunkIndex = 0;
+                        await PlayChunksAsync(piper, piperChunks, lang, cts.Token);
+                        if (!cts.IsCancellationRequested)
+                            StatusMessage = _l.T("tts.done");
+                        return;
+                    }
+                    catch (OperationCanceledException) { return; }
+                    catch
+                    {
+                        // fall through to system
+                    }
                 }
-                catch (OperationCanceledException) { }
-                catch (Exception fallbackEx)
+
+                if (preferredEngine != TtsEngineKind.System
+                    && _engines.TryGetValue(TtsEngineKind.System, out var system))
                 {
-                    StatusMessage = _l.T("tts.error", fallbackEx.Message);
+                    _edgeFellBack = true;
+                    StatusMessage = _l.T("tts.edgeFallback") + " · " + ex.Message;
+                    ActiveEngine = TtsEngineKind.System;
+                    Notify();
+                    await Task.Delay(900, CancellationToken.None);
+                    try
+                    {
+                        var systemChunks = TtsTextChunker.Chunk(plainText, 240);
+                        ChunkCount = systemChunks.Count;
+                        CurrentChunkIndex = 0;
+                        await PlayChunksAsync(system, systemChunks, lang, cts.Token);
+                        if (!cts.IsCancellationRequested)
+                            StatusMessage = _l.T("tts.done");
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception fallbackEx)
+                    {
+                        StatusMessage = _l.T("tts.error", fallbackEx.Message);
+                    }
+                }
+                else
+                {
+                    StatusMessage = _l.T("tts.error", ex.Message);
                 }
             }
             else
@@ -195,7 +261,9 @@ public sealed class TtsController : ITtsController
                             ? _l.T("tts.engineFallback")
                             : ActiveEngine == TtsEngineKind.EdgeNeural
                                 ? _l.T("tts.engineEdge")
-                                : _l.T("tts.engineSystem");
+                                : ActiveEngine == TtsEngineKind.Piper
+                                    ? _l.T("tts.enginePiper")
+                                    : _l.T("tts.engineSystem");
                         StatusMessage = _l.T("tts.chunkProgress", engineLabel, global + 1, chunks.Count);
                         Notify();
                         await HighlightAsync(chunks[global]);
@@ -391,9 +459,28 @@ public sealed class TtsController : ITtsController
             return (sys, sys is null ? null : _l.T("tts.edgeUnavailableNote"));
         }
 
+        if (preferred == TtsEngineKind.Piper)
+        {
+            if (_engines.TryGetValue(TtsEngineKind.Piper, out var piper)
+                && await piper.IsAvailableAsync(language, cancellationToken))
+                return (piper, null);
+
+            // Not downloaded yet — still return Piper so Speak triggers EnsureReady.
+            if (_engines.TryGetValue(TtsEngineKind.Piper, out var piperEngine))
+                return (piperEngine, _piper?.StatusMessage ?? _l.T("tts.piperPreparing"));
+
+            var sys = _engines.GetValueOrDefault(TtsEngineKind.System);
+            return (sys, sys is null ? null : _l.T("tts.piperUnavailableNote"));
+        }
+
+        // Auto: Edge → Piper → System
         if (_engines.TryGetValue(TtsEngineKind.EdgeNeural, out var autoEdge)
             && await autoEdge.IsAvailableAsync(language, cancellationToken))
             return (autoEdge, null);
+
+        if (_engines.TryGetValue(TtsEngineKind.Piper, out var autoPiper)
+            && await autoPiper.IsAvailableAsync(language, cancellationToken))
+            return (autoPiper, null);
 
         return (_engines.GetValueOrDefault(TtsEngineKind.System), null);
     }

@@ -491,6 +491,11 @@ window.epubReaderTts = {
     _preferNeural: false,
     _marks: [],
 
+    getHostname: function () {
+        try { return (location && location.hostname) ? String(location.hostname) : ''; }
+        catch (e) { return ''; }
+    },
+
     _normLang: function (lang) {
         return String(lang || 'en').toLowerCase().replace('_', '-');
     },
@@ -1063,6 +1068,14 @@ window.epubReaderTts = {
     },
 
     playMp3Base64: function (base64) {
+        return this.playAudioBase64('audio/mpeg', base64);
+    },
+
+    playWavBase64: function (base64) {
+        return this.playAudioBase64('audio/wav', base64);
+    },
+
+    playAudioBase64: function (mime, base64) {
         var self = this;
         return new Promise(function (resolve, reject) {
             self.stopAudioOnly();
@@ -1071,7 +1084,7 @@ window.epubReaderTts = {
                 resolve();
                 return;
             }
-            var audio = new Audio('data:audio/mpeg;base64,' + base64);
+            var audio = new Audio('data:' + (mime || 'audio/mpeg') + ';base64,' + base64);
             self._audio = audio;
             self._audioResolve = resolve;
             audio.onended = function () {

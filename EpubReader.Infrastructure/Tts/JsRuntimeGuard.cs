@@ -3,7 +3,7 @@ using Microsoft.JSInterop;
 
 namespace EpubReader.Infrastructure.Tts;
 
-internal static class JsRuntimeGuard
+public static class JsRuntimeGuard
 {
     public static IJSRuntime Require(IJsRuntimeAccessor accessor) =>
         accessor.Current

@@ -7,18 +7,22 @@ namespace EpubReader.Infrastructure.Tts;
 public sealed class EdgeNeuralTtsEngine : ITtsEngine
 {
     private readonly IJsRuntimeAccessor _js;
-    private readonly EdgeTtsSynthesizer _synthesizer = new();
+    private readonly EdgeTtsSynthesizer _direct = new();
+    private readonly EdgeTtsProxyClient _proxy = new();
+    private bool? _useProxy;
 
     public EdgeNeuralTtsEngine(IJsRuntimeAccessor js) => _js = js;
 
     public TtsEngineKind Kind => TtsEngineKind.EdgeNeural;
     public string DisplayName => "Edge neural";
 
-    public Task<bool> IsAvailableAsync(string language, CancellationToken cancellationToken = default)
+    public async Task<bool> IsAvailableAsync(string language, CancellationToken cancellationToken = default)
     {
-        // Optimistic: real connectivity is probed on Speak. Never permanently lock out Edge
-        // after a single failure (that was forcing silent system TTS).
-        return Task.FromResult(_js.Current is not null);
+        if (_js.Current is null) return false;
+        if (!await ShouldUseProxyAsync(cancellationToken))
+            return true; // direct Edge (MAUI / non-GH-Pages web)
+
+        return await _proxy.IsReachableAsync(cancellationToken);
     }
 
     public Task SpeakAsync(string text, string language, double rate, CancellationToken cancellationToken = default) =>
@@ -34,8 +38,6 @@ public sealed class EdgeNeuralTtsEngine : ITtsEngine
         if (chunks.Count == 0) return;
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Real Edge neural only — do NOT fall back to speechSynthesis here.
-        // Silent fallback made users hear system voices while thinking Edge was active.
         await SpeakEdgePrefetchAsync(chunks, language, rate, onChunkStarted, cancellationToken);
     }
 
@@ -46,10 +48,11 @@ public sealed class EdgeNeuralTtsEngine : ITtsEngine
         Func<int, CancellationToken, Task>? onChunkStarted,
         CancellationToken cancellationToken)
     {
-        // Speculative: always synthesize one chunk ahead while current audio plays.
-        var currentTask = _synthesizer.SynthesizeAsync(chunks[0], language, rate, cancellationToken);
-        Task<byte[]?>? nextTask = chunks.Count > 1
-            ? _synthesizer.SynthesizeAsync(chunks[1], language, rate, cancellationToken)
+        var useProxy = await ShouldUseProxyAsync(cancellationToken);
+
+        var currentTask = SynthAsync(useProxy, chunks[0], language, rate, cancellationToken);
+        Task<byte[]>? nextTask = chunks.Count > 1
+            ? SynthAsync(useProxy, chunks[1], language, rate, cancellationToken)
             : null;
 
         for (var i = 0; i < chunks.Count; i++)
@@ -59,7 +62,7 @@ public sealed class EdgeNeuralTtsEngine : ITtsEngine
             if (onChunkStarted is not null)
                 await onChunkStarted(i, cancellationToken);
 
-            byte[]? mp3;
+            byte[] mp3;
             try
             {
                 mp3 = await currentTask;
@@ -70,12 +73,12 @@ public sealed class EdgeNeuralTtsEngine : ITtsEngine
                 throw new InvalidOperationException($"Edge neural: {ex.Message}", ex);
             }
 
-            if (mp3 is not { Length: > 0 })
+            if (mp3.Length == 0)
                 throw new InvalidOperationException("Edge neural: empty audio");
 
-            currentTask = nextTask ?? Task.FromResult<byte[]?>(null);
+            currentTask = nextTask ?? Task.FromResult(Array.Empty<byte>());
             nextTask = i + 2 < chunks.Count
-                ? _synthesizer.SynthesizeAsync(chunks[i + 2], language, rate, cancellationToken)
+                ? SynthAsync(useProxy, chunks[i + 2], language, rate, cancellationToken)
                 : null;
 
             var runtime = JsRuntimeGuard.Require(_js);
@@ -91,6 +94,56 @@ public sealed class EdgeNeuralTtsEngine : ITtsEngine
                 throw;
             }
         }
+    }
+
+    private Task<byte[]> SynthAsync(bool useProxy, string text, string language, double rate, CancellationToken ct) =>
+        useProxy
+            ? _proxy.SynthesizeAsync(text, language, rate, ct)
+            : SynthDirectAsync(text, language, rate, ct);
+
+    private async Task<byte[]> SynthDirectAsync(string text, string language, double rate, CancellationToken ct)
+    {
+        var bytes = await _direct.SynthesizeAsync(text, language, rate, ct);
+        return bytes ?? [];
+    }
+
+    /// <summary>
+    /// Proxy only on lukasz26671.github.io. Elsewhere on web → direct Edge; MAUI → direct Edge.
+    /// </summary>
+    private async Task<bool> ShouldUseProxyAsync(CancellationToken cancellationToken)
+    {
+        if (_useProxy is bool cached)
+            return cached;
+
+        if (!OperatingSystem.IsBrowser())
+        {
+            _useProxy = false;
+            return false;
+        }
+
+        var runtime = _js.Current;
+        if (runtime is null)
+        {
+            _useProxy = false;
+            return false;
+        }
+
+        try
+        {
+            var host = await runtime.InvokeAsync<string>(
+                "epubReaderTts.getHostname",
+                cancellationToken);
+            _useProxy = string.Equals(
+                host?.Trim(),
+                EdgeTtsProxyConfig.GitHubPagesHost,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            _useProxy = false;
+        }
+
+        return _useProxy.Value;
     }
 
     public Task PauseAsync()

@@ -1,4 +1,4 @@
-using EpubReader.Application;
+﻿using EpubReader.Application;
 using EpubReader.Application.Interfaces;
 using EpubReader.Infrastructure;
 using EpubReaderDX.Services;
@@ -27,6 +27,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISystemLocaleProvider, MauiSystemLocaleProvider>();
         builder.Services.AddSingleton<ITtsEngine, EpubReader.Infrastructure.Tts.SystemTtsEngine>();
         builder.Services.AddSingleton<ITtsEngine, EpubReader.Infrastructure.Tts.EdgeNeuralTtsEngine>();
+        builder.Services.AddSingleton<EpubReaderDX.Services.Tts.PiperTtsEngine>();
+        builder.Services.AddSingleton<ITtsEngine>(sp => sp.GetRequiredService<EpubReaderDX.Services.Tts.PiperTtsEngine>());
+        builder.Services.AddSingleton<IPiperVoiceService>(sp => sp.GetRequiredService<EpubReaderDX.Services.Tts.PiperTtsEngine>());
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

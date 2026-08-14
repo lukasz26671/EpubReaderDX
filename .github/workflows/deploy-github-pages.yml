@@ -58,6 +58,29 @@ jobs:
           print(f"Updated base href to {base}")
           PY
 
+          # Bust sticky HTML caches: unique comment + ensure fingerprinted CSS/JS landed
+          python3 - "$SITE_DIR/index.html" "${{ github.sha }}" <<'PY'
+          import pathlib, re, sys
+          path = pathlib.Path(sys.argv[1])
+          sha = sys.argv[2][:12]
+          text = path.read_text(encoding="utf-8")
+          if "<!-- build:" not in text:
+              text = text.replace("</head>", f"<!-- build:{sha} -->\n</head>", 1)
+          else:
+              text = re.sub(r"<!-- build:[^>]*-->", f"<!-- build:{sha} -->", text, count=1)
+          # Fail the deploy if publish left unfingerprinted local CSS/JS (would get stuck in cache).
+          bad = re.findall(r'(?:href|src)="(?:css|js)/[^"#?]+\.(?:css|js)"', text)
+          # Allow only fingerprinted forms: name.{hash}.ext OR leftover placeholder (shouldn't remain)
+          leftovers = [b for b in bad if not re.search(r'\.[A-Za-z0-9]{6,}\.(?:css|js)"$', b)]
+          if leftovers:
+              raise SystemExit(f"Unfingerprinted assets in index.html: {leftovers}")
+          path.write_text(text, encoding="utf-8")
+          print(f"Stamped build {sha}")
+          print("CSS/JS refs:")
+          for m in re.finditer(r'(?:href|src)="[^"]+\.(?:css|js)"', text):
+              print(" ", m.group(0))
+          PY
+
           # Jekyll must not process _framework
           touch "$SITE_DIR/.nojekyll"
 

@@ -244,6 +244,9 @@ public sealed class ReaderStateService : IReaderStateService
             TtsLanguageOverride = string.IsNullOrWhiteSpace(settings.TtsLanguageOverride)
                 ? null
                 : settings.TtsLanguageOverride.Trim(),
+            PiperVoiceId = string.IsNullOrWhiteSpace(settings.PiperVoiceId)
+                ? null
+                : settings.PiperVoiceId.Trim(),
             UiLanguage = settings.UiLanguage
         };
         await _preferences.SaveSettingsAsync(_settings, cancellationToken);
@@ -272,6 +275,7 @@ public sealed class ReaderStateService : IReaderStateService
         TtsEngine = _settings.TtsEngine,
         TtsRate = _settings.TtsRate,
         TtsLanguageOverride = _settings.TtsLanguageOverride,
+        PiperVoiceId = _settings.PiperVoiceId,
         UiLanguage = _settings.UiLanguage
     };
 
