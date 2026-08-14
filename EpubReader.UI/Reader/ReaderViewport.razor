@@ -52,7 +52,7 @@
         var chapter = State.CurrentChapter;
         var pad = $"padding-left:max(1rem, var(--reader-page-margin)); padding-right:max(1rem, var(--reader-page-margin));";
         <div id="reader-scroll" class="flex-1 overflow-y-auto py-6 scroll-smooth" style="@pad" @onclick="OnReaderClick">
-            <div class="reader-column mx-auto min-h-full flex flex-col justify-between pb-8">
+            <div class="reader-column mx-auto min-h-full flex flex-col justify-between reader-column--nav">
                 <div class="reader-border border-b pb-4 mb-6 flex items-center justify-between gap-3 text-xs reader-muted">
                     <div class="min-w-0">
                         <p class="truncate font-medium" style="color:var(--rs-text)">@chapter.Title</p>
@@ -77,7 +77,7 @@
                     @((MarkupString)(string.IsNullOrWhiteSpace(chapter.DisplayHtml) ? chapter.RawHtml : chapter.DisplayHtml))
                 </article>
 
-                <div class="mt-12 pt-6 reader-border border-t flex items-center justify-between gap-3">
+                <div class="reader-nav mt-12 pt-6 reader-border border-t flex items-center justify-between gap-3">
                     <button type="button" class="px-4 py-2 reader-surface-2 reader-hover rounded-lg text-sm font-medium transition flex items-center gap-2 disabled:opacity-40"
                             disabled="@(State.CurrentChapterIndex == 0)" @onclick="() => State.PreviousChapter()" @onclick:stopPropagation="true">
                         <i data-lucide="chevron-left" class="w-4 h-4"></i>

@@ -331,26 +331,33 @@ body {
 }
 
 .we-status-toast {
-    bottom: calc(4.75rem + var(--safe-bottom, 0px));
+    bottom: calc(5.25rem + var(--safe-bottom, 0px));
 }
 
 .tts-dock {
     position: absolute;
     left: 50%;
-    bottom: calc(1rem + var(--safe-bottom, 0px));
+    bottom: calc(0.65rem + var(--safe-bottom, 0px));
     transform: translateX(-50%);
-    z-index: 55;
+    z-index: 35; /* below drawers (z-40+) so settings aren't covered */
     display: flex;
     align-items: center;
     gap: 0.15rem;
-    padding: 0.4rem 0.55rem;
+    padding: 0.35rem 0.5rem;
     border-radius: 9999px;
     background: #0b1220;
     color: #f8fafc;
     box-shadow: 0 12px 32px rgba(15, 23, 42, 0.42);
     border: 1px solid rgba(248, 250, 252, 0.12);
-    max-width: calc(100vw - 1.5rem);
+    max-width: calc(100vw - 1.25rem - var(--safe-left, 0px) - var(--safe-right, 0px));
     pointer-events: auto;
+    transition: opacity 0.2s ease, transform 0.22s ease;
+}
+
+.drawer-open .tts-dock {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 140%);
 }
 
 .tts-dock__btn {
@@ -477,6 +484,25 @@ body {
     padding-right: var(--reader-page-margin, 16px);
 }
 
+/* Keep prev/next clear of the floating TTS dock.
+   Short chapters use min-h-full + justify-between — padding must be ON the column
+   (border-box) so nav sits above the dock, not only after scroll. */
+.has-book #reader-scroll {
+    padding-bottom: calc(0.75rem + var(--safe-bottom, 0px));
+}
+
+.has-book .reader-column--nav {
+    box-sizing: border-box;
+    min-height: 100%;
+    padding-bottom: calc(6.75rem + var(--safe-bottom, 0px));
+}
+
+.reader-nav {
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+}
+
 .theme-swatch-btn {
     border: 1px solid var(--rs-border);
     border-radius: 0.75rem;
@@ -502,16 +528,49 @@ body {
 }
 
 .settings-scroll {
-    max-height: min(78vh, 640px);
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     padding-right: 0.25rem;
+}
+
+.reader-drawer {
+    max-height: calc(100dvh - 0.75rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+    z-index: 45;
+    box-sizing: border-box;
 }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--rs-muted) 50%, transparent); border-radius: 3px; }
 
-#app, #app > div { height: 100%; }
+/* Fill the visual viewport (iPhone toolbar / home indicator) — not a short 100% parent */
+html {
+    height: 100%;
+    height: 100dvh;
+}
+html, body {
+    margin: 0;
+    overflow: hidden;
+}
+body {
+    min-height: 100%;
+    min-height: 100dvh;
+    height: 100%;
+    height: 100dvh;
+    transition: background-color 0.25s ease, color 0.25s ease;
+}
+#app,
+#app > div,
+#app-body {
+    height: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    min-height: 100%;
+    min-height: 100dvh;
+    box-sizing: border-box;
+}
 .status-bar-safe-area { display: none; }
 
 /* Safe areas: Dynamic Island / notch / home indicator (esp. installed PWA) */
@@ -523,9 +582,14 @@ body {
 }
 
 #app-body {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    /* Horizontal insets only — bottom inset is applied on dock/chrome so we don't double-pad */
     padding-left: var(--safe-left);
     padding-right: var(--safe-right);
-    padding-bottom: var(--safe-bottom);
+    padding-bottom: 0;
     box-sizing: border-box;
 }
 

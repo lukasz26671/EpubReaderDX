@@ -6,7 +6,7 @@
 @inject NavigationManager Nav
 @implements IAsyncDisposable
 
-<div class="@ReaderThemeCss.BodyClasses(State.Settings.Theme) @(State.IsFullscreenChromeHidden ? "chrome-hidden" : null)"
+<div class="@ReaderThemeCss.BodyClasses(State.Settings.Theme) @(State.IsFullscreenChromeHidden ? "chrome-hidden" : null) @(State.HasBook ? "has-book" : null) @(State.IsSettingsOpen || State.IsSearchOpen || State.IsBookmarksOpen ? "drawer-open" : null)"
      id="app-body"
      data-theme="@ReaderThemeCss.ThemeAttribute(State.Settings.Theme)"
      lang="@L.Culture"
