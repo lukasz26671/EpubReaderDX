@@ -21,6 +21,7 @@ public interface ITtsController
         TtsEngineKind preferredEngine,
         double rate,
         string? languageOverride,
+        int startChunkIndex = 0,
         CancellationToken cancellationToken = default);
 
     Task TogglePlayPauseAsync();

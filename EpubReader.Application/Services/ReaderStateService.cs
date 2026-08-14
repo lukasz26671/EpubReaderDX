@@ -23,6 +23,8 @@ public sealed class ReaderStateService : IReaderStateService
     private string _searchQuery = string.Empty;
     private string _tocFilter = string.Empty;
     private string _bookKey = string.Empty;
+    private int _ttsChunkIndex;
+    private double _scrollRatio;
 
     public ReaderStateService(
         IEpubParserService parser,
@@ -61,6 +63,7 @@ public sealed class ReaderStateService : IReaderStateService
     public string SearchQuery => _searchQuery;
     public string TocFilter => _tocFilter;
     public string? PendingScrollFragment { get; private set; }
+    public double? PendingScrollRatio { get; private set; }
     public bool HasBook => _book?.Chapters.Count > 0;
     public bool IsSidebarOpen { get; private set; } = true;
     public bool IsSettingsOpen { get; private set; }
@@ -181,7 +184,7 @@ public sealed class ReaderStateService : IReaderStateService
     public async Task LoadSampleAsync(CancellationToken cancellationToken = default)
     {
         await using var stream = await _sampleBook.CreateSampleAsync(cancellationToken);
-        await OpenFromStreamAsync(stream, "SampleBook.epub", cancellationToken);
+        await OpenFromStreamAsync(stream, "LittleLantern.epub", cancellationToken);
     }
 
     public async Task PickAndOpenAsync(CancellationToken cancellationToken = default)
@@ -194,9 +197,12 @@ public sealed class ReaderStateService : IReaderStateService
     public void GoToChapter(int index, string? fragment = null)
     {
         if (_book is null || index < 0 || index >= _book.Chapters.Count) return;
+        if (index == CurrentChapterIndex && string.IsNullOrWhiteSpace(fragment)) return;
         CurrentChapterIndex = index;
         PendingScrollFragment = string.IsNullOrWhiteSpace(fragment) ? null : fragment;
-        _ = PersistPositionAsync();
+        PendingScrollRatio = null;
+        _ttsChunkIndex = 0;
+        _ = PersistPositionAsync(0, 0);
         Notify();
     }
 
@@ -301,6 +307,11 @@ public sealed class ReaderStateService : IReaderStateService
             PiperVoiceId = string.IsNullOrWhiteSpace(settings.PiperVoiceId)
                 ? null
                 : settings.PiperVoiceId.Trim(),
+            RestoreScrollPosition = settings.RestoreScrollPosition,
+            RestoreTtsPosition = settings.RestoreTtsPosition,
+            TtsAutoNextChapter = settings.TtsAutoNextChapter,
+            TtsAutoPlay = settings.TtsAutoPlay,
+            InfiniteScroll = settings.InfiniteScroll,
             UiLanguage = settings.UiLanguage
         };
         await _preferences.SaveSettingsAsync(_settings, cancellationToken);
@@ -330,6 +341,11 @@ public sealed class ReaderStateService : IReaderStateService
         TtsRate = _settings.TtsRate,
         TtsLanguageOverride = _settings.TtsLanguageOverride,
         PiperVoiceId = _settings.PiperVoiceId,
+        RestoreScrollPosition = _settings.RestoreScrollPosition,
+        RestoreTtsPosition = _settings.RestoreTtsPosition,
+        TtsAutoNextChapter = _settings.TtsAutoNextChapter,
+        TtsAutoPlay = _settings.TtsAutoPlay,
+        InfiniteScroll = _settings.InfiniteScroll,
         UiLanguage = _settings.UiLanguage
     };
 
@@ -408,21 +424,43 @@ public sealed class ReaderStateService : IReaderStateService
         Notify();
     }
 
-    public async Task PersistPositionAsync(double scrollRatio = 0, CancellationToken cancellationToken = default)
+    public async Task PersistPositionAsync(double scrollRatio = 0, int? ttsChunkIndex = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(_bookKey) || !HasBook) return;
+        _scrollRatio = Math.Clamp(scrollRatio, 0, 1);
+        if (ttsChunkIndex is int chunk)
+            _ttsChunkIndex = Math.Max(0, chunk);
+
         await _preferences.SavePositionAsync(_bookKey, new ReadingPosition
         {
             ChapterIndex = CurrentChapterIndex,
-            ScrollRatio = Math.Clamp(scrollRatio, 0, 1)
+            ScrollRatio = _scrollRatio,
+            TtsChunkIndex = _ttsChunkIndex
         }, cancellationToken);
+    }
+
+    public Task PersistTtsChunkAsync(int ttsChunkIndex, CancellationToken cancellationToken = default) =>
+        PersistPositionAsync(_scrollRatio, ttsChunkIndex, cancellationToken);
+
+    public int GetResumeTtsChunkIndex()
+    {
+        if (!_settings.RestoreTtsPosition) return 0;
+        return Math.Max(0, _ttsChunkIndex);
     }
 
     public void ClearPendingScrollFragment() => PendingScrollFragment = null;
 
+    public void ClearPendingScrollRatio() => PendingScrollRatio = null;
+
     public void ClearStatus()
     {
         StatusMessage = null;
+        Notify();
+    }
+
+    public void ShowStatus(string message)
+    {
+        StatusMessage = string.IsNullOrWhiteSpace(message) ? null : message.Trim();
         Notify();
     }
 
@@ -440,6 +478,14 @@ public sealed class ReaderStateService : IReaderStateService
             ? position.ChapterIndex
             : 0;
         PendingScrollFragment = null;
+        _ttsChunkIndex = position is not null && position.ChapterIndex == CurrentChapterIndex
+            ? Math.Max(0, position.TtsChunkIndex)
+            : 0;
+        _scrollRatio = position is not null ? Math.Clamp(position.ScrollRatio, 0, 1) : 0;
+        PendingScrollRatio = _settings.RestoreScrollPosition
+            && _scrollRatio > 0.001
+            ? _scrollRatio
+            : null;
         IsDropZoneVisible = false;
         IsSidebarOpen = true;
         ErrorMessage = null;

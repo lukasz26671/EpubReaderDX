@@ -14,6 +14,7 @@ public interface IReaderStateService
     string SearchQuery { get; }
     string TocFilter { get; }
     string? PendingScrollFragment { get; }
+    double? PendingScrollRatio { get; }
     bool HasBook { get; }
     bool IsSidebarOpen { get; }
     bool IsSettingsOpen { get; }
@@ -53,7 +54,12 @@ public interface IReaderStateService
     void ToggleChrome();
     void SetDropZoneVisible(bool visible);
     void CloseDrawers();
-    Task PersistPositionAsync(double scrollRatio = 0, CancellationToken cancellationToken = default);
+    Task PersistPositionAsync(double scrollRatio = 0, int? ttsChunkIndex = null, CancellationToken cancellationToken = default);
+    Task PersistTtsChunkAsync(int ttsChunkIndex, CancellationToken cancellationToken = default);
+    /// <summary>Saved TTS chunk for the current chapter when restore is enabled; otherwise 0.</summary>
+    int GetResumeTtsChunkIndex();
     void ClearPendingScrollFragment();
+    void ClearPendingScrollRatio();
     void ClearStatus();
+    void ShowStatus(string message);
 }

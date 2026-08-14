@@ -10,9 +10,10 @@ public static class TtsTextChunker
 
     /// <summary>
     /// Packs whole sentences into utterances so highlight == what is being read.
-    /// Paragraph breaks still create chunk boundaries (longer pause downstream).
+    /// When <paramref name="breakOnParagraph"/> is false (Edge/Piper), paragraphs are packed
+    /// together until <paramref name="maxChars"/> — fewer synth round-trips.
     /// </summary>
-    public static IReadOnlyList<string> Chunk(string text, int maxChars = 280)
+    public static IReadOnlyList<string> Chunk(string text, int maxChars = 280, bool breakOnParagraph = true)
     {
         if (string.IsNullOrWhiteSpace(text)) return [];
 
@@ -42,7 +43,7 @@ public static class TtsTextChunker
             var s = sentence.Trim();
             if (s.Length == 0)
             {
-                if (afterParagraph) Flush(paragraphTail: true);
+                if (afterParagraph && breakOnParagraph) Flush(paragraphTail: true);
                 continue;
             }
 
@@ -51,18 +52,28 @@ public static class TtsTextChunker
                 Flush(paragraphTail: false);
                 foreach (var piece in SplitLong(s, maxChars))
                     chunks.Add(piece);
-                if (afterParagraph && chunks.Count > 0 && !chunks[^1].EndsWith("\n\n", StringComparison.Ordinal))
+                if (afterParagraph && breakOnParagraph && chunks.Count > 0 && !chunks[^1].EndsWith("\n\n", StringComparison.Ordinal))
                     chunks[^1] += "\n\n";
                 continue;
             }
 
-            if (len > 0 && len + 1 + s.Length > maxChars)
+            var joinLen = afterParagraph && !breakOnParagraph ? 2 : 1; // "\n\n" vs " "
+            if (len > 0 && len + joinLen + s.Length > maxChars)
                 Flush(paragraphTail: false);
 
-            current.Add(s);
-            len += (len == 0 ? 0 : 1) + s.Length;
+            if (len > 0 && afterParagraph && !breakOnParagraph)
+            {
+                // Soft paragraph break inside the same synth request.
+                current[^1] = current[^1].TrimEnd() + "\n\n" + s;
+                len += 2 + s.Length;
+            }
+            else
+            {
+                current.Add(s);
+                len += (len == 0 ? 0 : 1) + s.Length;
+            }
 
-            if (afterParagraph)
+            if (afterParagraph && breakOnParagraph)
                 Flush(paragraphTail: true);
         }
 

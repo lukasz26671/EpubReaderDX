@@ -503,6 +503,34 @@ body {
     flex-shrink: 0;
 }
 
+.infinite-pad {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: max(72vh, 26rem);
+    padding: 2rem 1rem;
+    text-align: center;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    color: var(--rs-muted);
+    opacity: 0.72;
+    user-select: none;
+    pointer-events: none;
+}
+.infinite-pad span {
+    max-width: 18rem;
+    line-height: 1.45;
+}
+.infinite-pad--next {
+    margin-top: 2.5rem;
+    border-top: 1px dashed color-mix(in srgb, var(--rs-border) 80%, transparent);
+}
+.infinite-pad--prev {
+    margin-bottom: 1.75rem;
+    border-bottom: 1px dashed color-mix(in srgb, var(--rs-border) 80%, transparent);
+}
+
 .theme-swatch-btn {
     border: 1px solid var(--rs-border);
     border-radius: 0.75rem;
@@ -528,15 +556,22 @@ body {
 }
 
 .settings-scroll {
-    max-height: none;
     flex: 1 1 auto;
     min-height: 0;
+    overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     padding-right: 0.25rem;
+    padding-bottom: 0.85rem;
 }
 
 .reader-drawer {
-    max-height: calc(100dvh - 0.75rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+    /* Fill the content pane (below chrome), not the full viewport — otherwise bottom is clipped. */
+    top: 0.5rem;
+    bottom: 0.5rem;
+    max-height: none;
+    overflow: hidden;
     z-index: 45;
     box-sizing: border-box;
 }

@@ -135,6 +135,8 @@ public sealed class PiperTtsEngine : ITtsEngine, IPiperVoiceService
                 ? _runtime.SynthesizeWavAsync(chunks[i + 2], rate, cancellationToken)
                 : null;
 
+            cancellationToken.ThrowIfCancellationRequested();
+
             var runtime = JsRuntimeGuard.Require(_js);
             var b64 = Convert.ToBase64String(wav);
             await using var reg = cancellationToken.Register(() => _ = StopAsync());
@@ -147,6 +149,13 @@ public sealed class PiperTtsEngine : ITtsEngine, IPiperVoiceService
                 try { await StopAsync(); } catch { /* ignore */ }
                 throw;
             }
+            catch (Exception) when (cancellationToken.IsCancellationRequested)
+            {
+                try { await StopAsync(); } catch { /* ignore */ }
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
         }
     }
 
@@ -194,6 +203,11 @@ public sealed class PiperTtsEngine : ITtsEngine, IPiperVoiceService
             TtsRate = cur.TtsRate,
             TtsLanguageOverride = cur.TtsLanguageOverride,
             PiperVoiceId = cur.PiperVoiceId,
+            RestoreScrollPosition = cur.RestoreScrollPosition,
+            RestoreTtsPosition = cur.RestoreTtsPosition,
+            TtsAutoNextChapter = cur.TtsAutoNextChapter,
+            TtsAutoPlay = cur.TtsAutoPlay,
+            InfiniteScroll = cur.InfiniteScroll,
             UiLanguage = cur.UiLanguage
         };
     }

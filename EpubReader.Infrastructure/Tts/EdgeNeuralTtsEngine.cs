@@ -81,6 +81,8 @@ public sealed class EdgeNeuralTtsEngine : ITtsEngine
                 ? SynthAsync(useProxy, chunks[i + 2], language, rate, cancellationToken)
                 : null;
 
+            cancellationToken.ThrowIfCancellationRequested();
+
             var runtime = JsRuntimeGuard.Require(_js);
             var b64 = Convert.ToBase64String(mp3);
             await using var reg = cancellationToken.Register(() => _ = StopAsync());
@@ -93,6 +95,13 @@ public sealed class EdgeNeuralTtsEngine : ITtsEngine
                 try { await StopAsync(); } catch { /* ignore */ }
                 throw;
             }
+            catch (Exception) when (cancellationToken.IsCancellationRequested)
+            {
+                try { await StopAsync(); } catch { /* ignore */ }
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
         }
     }
 

@@ -120,6 +120,11 @@
     private DotNetObjectReference<ReaderApp>? _dotNetRef;
     private int _lastChapterIndex = -1;
     private bool _launchHandled;
+    private bool _ttsWasSpeaking;
+    private bool _continuousTtsSession;
+    private bool _pendingAutoAdvance;
+    private bool _pendingAutoPlayAfterChapter;
+    private int _infiniteLanding;
 
     protected override async Task OnInitializedAsync()
     {
@@ -150,24 +155,63 @@
 
         if (State.HasBook && State.CurrentChapterIndex != _lastChapterIndex)
         {
-            if (_lastChapterIndex >= 0)
+            var autoContinuing = _pendingAutoAdvance;
+            var autoPlay = _pendingAutoPlayAfterChapter;
+            _pendingAutoAdvance = false;
+            _pendingAutoPlayAfterChapter = false;
+
+            // Stop immediately on manual chapter change (also done in HandleChange for earlier cancel).
+            if (_lastChapterIndex >= 0 && !autoContinuing)
                 await Tts.StopAsync();
 
             _lastChapterIndex = State.CurrentChapterIndex;
+            var infiniteLanding = _infiniteLanding;
+            _infiniteLanding = 0;
             try
             {
+                if (State.Settings.InfiniteScroll)
+                    await Js.InvokeVoidAsync("epubReaderUi.holdInfiniteScroll");
+
+                await Js.InvokeVoidAsync("epubReaderUi.ensureScrollPersist");
+
                 if (!string.IsNullOrWhiteSpace(State.PendingScrollFragment))
                 {
                     await Task.Delay(30);
                     await Js.InvokeVoidAsync("epubReaderUi.scrollToFragment", State.PendingScrollFragment);
                     State.ClearPendingScrollFragment();
+                    State.ClearPendingScrollRatio();
+                }
+                else if (infiniteLanding < 0)
+                {
+                    await Task.Delay(40);
+                    await Js.InvokeVoidAsync("epubReaderUi.scrollReaderContentEnd");
+                    State.ClearPendingScrollRatio();
+                }
+                else if (infiniteLanding > 0)
+                {
+                    await Task.Delay(40);
+                    await Js.InvokeVoidAsync("epubReaderUi.scrollReaderTop");
+                    State.ClearPendingScrollRatio();
+                }
+                else if (!autoContinuing
+                         && State.Settings.RestoreScrollPosition
+                         && State.PendingScrollRatio is double ratio
+                         && ratio > 0.001)
+                {
+                    await Task.Delay(40);
+                    await Js.InvokeVoidAsync("epubReaderUi.setScrollRatio", ratio);
+                    State.ClearPendingScrollRatio();
                 }
                 else
                 {
+                    State.ClearPendingScrollRatio();
                     await Js.InvokeVoidAsync("epubReaderUi.scrollReaderTop");
                 }
             }
             catch { }
+
+            if (autoContinuing && autoPlay)
+                await StartTtsAsync(startChunkIndex: 0);
         }
         else if (!string.IsNullOrWhiteSpace(State.PendingScrollFragment))
         {
@@ -266,14 +310,97 @@
 
     private void HandleChange()
     {
+        // Cancel Edge/Piper synth ASAP — don't wait for heavy chapter HTML re-render.
+        if (State.HasBook
+            && _lastChapterIndex >= 0
+            && State.CurrentChapterIndex != _lastChapterIndex)
+        {
+            if (_pendingAutoAdvance)
+            {
+                // Auto-next in progress — keep continuous session when auto-reading.
+            }
+            else
+            {
+                _continuousTtsSession = false;
+                if (Tts.IsSpeaking)
+                    _ = Tts.StopAsync();
+            }
+        }
+
         _ = DismissStatusLaterAsync();
         InvokeAsync(StateHasChanged);
     }
 
     private void HandleTtsChange()
     {
+        if (State.Settings.RestoreTtsPosition)
+        {
+            if (Tts.IsSpeaking)
+            {
+                _ttsWasSpeaking = true;
+                _ = State.PersistTtsChunkAsync(Tts.CurrentChunkIndex);
+            }
+            else if (_ttsWasSpeaking)
+            {
+                _ttsWasSpeaking = false;
+                // Natural completion leaves a status message; stop/cancel clears it — keep chunk for resume.
+                if (!string.IsNullOrWhiteSpace(Tts.StatusMessage))
+                {
+                    _ = State.PersistTtsChunkAsync(0);
+                    _ = TryAutoNextAfterTtsAsync();
+                }
+                else
+                {
+                    _continuousTtsSession = false;
+                }
+            }
+        }
+        else if (Tts.IsSpeaking)
+        {
+            _ttsWasSpeaking = true;
+        }
+        else if (_ttsWasSpeaking)
+        {
+            _ttsWasSpeaking = false;
+            if (!string.IsNullOrWhiteSpace(Tts.StatusMessage))
+                _ = TryAutoNextAfterTtsAsync();
+            else
+                _continuousTtsSession = false;
+        }
+
         _ = DismissTtsStatusLaterAsync();
         InvokeAsync(StateHasChanged);
+    }
+
+    private Task TryAutoNextAfterTtsAsync()
+    {
+        if (!_continuousTtsSession || State.Book is null)
+            return Task.CompletedTask;
+
+        // AutoPlay alone also advances so one toggle is enough for continuous reading.
+        var wantNext = State.Settings.TtsAutoNextChapter || State.Settings.TtsAutoPlay;
+        if (!wantNext)
+            return Task.CompletedTask;
+
+        if (State.CurrentChapterIndex >= State.Book.Chapters.Count - 1)
+        {
+            _continuousTtsSession = false;
+            return Task.CompletedTask;
+        }
+
+        _pendingAutoAdvance = true;
+        _pendingAutoPlayAfterChapter = State.Settings.TtsAutoPlay;
+        return InvokeAsync(() => State.NextChapter());
+    }
+
+    [JSInvokable]
+    public Task OnReaderScroll(double scrollRatio)
+    {
+        if (!State.HasBook) return Task.CompletedTask;
+        int? chunk = State.Settings.RestoreTtsPosition && Tts.IsSpeaking
+            ? Tts.CurrentChunkIndex
+            : null;
+        return State.PersistPositionAsync(scrollRatio, chunk);
     }
 
     private async Task DismissStatusLaterAsync()
@@ -323,6 +450,11 @@
             TtsRate = next,
             TtsLanguageOverride = State.Settings.TtsLanguageOverride,
             PiperVoiceId = State.Settings.PiperVoiceId,
+            RestoreScrollPosition = State.Settings.RestoreScrollPosition,
+            RestoreTtsPosition = State.Settings.RestoreTtsPosition,
+            TtsAutoNextChapter = State.Settings.TtsAutoNextChapter,
+            TtsAutoPlay = State.Settings.TtsAutoPlay,
+            InfiniteScroll = State.Settings.InfiniteScroll,
             UiLanguage = State.Settings.UiLanguage
         };
         await State.UpdateSettingsAsync(s);
@@ -339,22 +471,57 @@
             return;
         }
 
+        _continuousTtsSession = State.Settings.TtsAutoNextChapter || State.Settings.TtsAutoPlay;
+        await StartTtsAsync(State.GetResumeTtsChunkIndex());
+    }
+
+    private async Task StartTtsAsync(int startChunkIndex)
+    {
+        if (!State.HasBook || State.CurrentChapter is null) return;
         await Tts.PlayChapterAsync(
             State.CurrentChapter.PlainText,
             State.Book?.Metadata.Language,
             State.Settings.TtsEngine,
             State.Settings.TtsRate,
-            State.Settings.TtsLanguageOverride);
+            State.Settings.TtsLanguageOverride,
+            startChunkIndex);
     }
 
-    private Task StopTtsAsync() => Tts.StopAsync();
+    private async Task StopTtsAsync()
+    {
+        _continuousTtsSession = false;
+        _pendingAutoAdvance = false;
+        _pendingAutoPlayAfterChapter = false;
+        var chunk = Tts.CurrentChunkIndex;
+        await Tts.StopAsync();
+        if (State.Settings.RestoreTtsPosition)
+            await State.PersistTtsChunkAsync(chunk);
+    }
     private Task SkipTtsForwardAsync() => Tts.SkipForwardAsync();
     private Task SkipTtsBackAsync() => Tts.SkipBackAsync();
+
+    [JSInvokable]
+    public Task OnInfiniteChapter(int direction)
+    {
+        if (!State.Settings.InfiniteScroll || !State.HasBook) return Task.CompletedTask;
+        _infiniteLanding = direction > 0 ? 1 : -1;
+        if (direction > 0) State.NextChapter();
+        else State.PreviousChapter();
+        return Task.CompletedTask;
+    }
 
     [JSInvokable]
     public Task OnDropZoneChanged(bool visible)
     {
         State.SetDropZoneVisible(visible);
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnNonEpubDropped()
+    {
+        State.SetDropZoneVisible(false);
+        State.ShowStatus(L.T("status.epubOnly"));
         return Task.CompletedTask;
     }
 
@@ -371,6 +538,11 @@
             var base64 = root.TryGetProperty("base64", out var b) ? b.GetString() : null;
             var name = root.TryGetProperty("name", out var n) ? n.GetString() : "book.epub";
             if (string.IsNullOrWhiteSpace(base64)) return;
+            if (!IsEpubFileName(name))
+            {
+                State.ShowStatus(L.T("status.epubOnly"));
+                return;
+            }
             await State.OpenFromBase64Async(base64, name);
         }
         catch
@@ -378,6 +550,10 @@
             // Malformed drop payload — ignore.
         }
     }
+
+    private static bool IsEpubFileName(string? name) =>
+        !string.IsNullOrWhiteSpace(name)
+        && name.EndsWith(".epub", StringComparison.OrdinalIgnoreCase);
 
     [JSInvokable]
     public Task OnContentLinkClicked(string? href, string? basePath) =>
@@ -496,6 +672,15 @@
         Tts.OnChange -= HandleTtsChange;
         L.OnChange -= HandleChange;
         JsAccessor.Detach(Js);
+        try
+        {
+            var ratio = await Js.InvokeAsync<double>("epubReaderUi.getScrollRatio");
+            int? chunk = State.Settings.RestoreTtsPosition && Tts.IsSpeaking
+                ? Tts.CurrentChunkIndex
+                : null;
+            await State.PersistPositionAsync(ratio, chunk);
+        }
+        catch { }
         try { await Tts.StopAsync(); } catch { }
         try { await Js.InvokeVoidAsync("epubReaderUi.unbind"); } catch { }
         _dotNetRef?.Dispose();

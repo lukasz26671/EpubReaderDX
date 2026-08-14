@@ -12,8 +12,8 @@
 
 @if (State.IsSettingsOpen)
 {
-    <div class="reader-drawer absolute top-2 right-2 sm:right-6 w-[22rem] sm:w-96 border rounded-2xl shadow-2xl p-5 z-50 transition-all flex flex-col">
-        <div class="flex justify-between items-center mb-3 pb-2 reader-border border-b">
+    <div class="reader-drawer absolute top-2 bottom-2 right-2 sm:right-6 w-[22rem] sm:w-96 border rounded-2xl shadow-2xl p-5 z-50 transition-all flex flex-col min-h-0 overflow-hidden">
+        <div class="flex justify-between items-center mb-3 pb-2 reader-border border-b shrink-0">
             <h3 class="font-bold text-sm flex items-center gap-2">
                 <i data-lucide="palette" class="w-4 h-4" style="color:var(--rs-accent)"></i>
                 @L.T("settings.title")
@@ -23,7 +23,7 @@
             </button>
         </div>
 
-        <div class="settings-scroll space-y-5 text-xs">
+        <div class="settings-scroll space-y-5 text-xs min-h-0">
             <div>
                 <label class="block font-medium reader-muted mb-2">@L.T("settings.uiLanguage")</label>
                 <div class="grid grid-cols-3 gap-1.5">
@@ -122,6 +122,16 @@
                 <input type="range" min="8" max="48" value="@State.Settings.PageMargin" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnMarginInput" />
             </div>
 
+            <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                <input type="checkbox" class="mt-0.5" style="accent-color:var(--rs-accent)"
+                       checked="@State.Settings.InfiniteScroll"
+                       @onchange="OnInfiniteScrollChange" />
+                <span>
+                    <span class="font-medium block">@L.T("settings.infiniteScroll")</span>
+                    <span class="reader-muted text-[11px] leading-snug block mt-0.5">@L.T("settings.infiniteScrollHint")</span>
+                </span>
+            </label>
+
             <div class="pt-2 reader-border border-t space-y-3">
                 <div class="flex items-center justify-between gap-2">
                     <label class="font-medium reader-muted flex items-center gap-1.5">
@@ -207,6 +217,46 @@
                     </div>
                     <input type="range" min="0.5" max="2.0" step="0.1" value="@State.Settings.TtsRate.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnTtsRateInput" />
                 </div>
+
+                <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input type="checkbox" class="mt-0.5" style="accent-color:var(--rs-accent)"
+                           checked="@State.Settings.RestoreScrollPosition"
+                           @onchange="OnRestoreScrollChange" />
+                    <span>
+                        <span class="font-medium block">@L.T("settings.restoreScroll")</span>
+                        <span class="reader-muted text-[11px] leading-snug block mt-0.5">@L.T("settings.restoreScrollHint")</span>
+                    </span>
+                </label>
+
+                <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input type="checkbox" class="mt-0.5" style="accent-color:var(--rs-accent)"
+                           checked="@State.Settings.RestoreTtsPosition"
+                           @onchange="OnRestoreTtsChange" />
+                    <span>
+                        <span class="font-medium block">@L.T("settings.restoreTts")</span>
+                        <span class="reader-muted text-[11px] leading-snug block mt-0.5">@L.T("settings.restoreTtsHint")</span>
+                    </span>
+                </label>
+
+                <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input type="checkbox" class="mt-0.5" style="accent-color:var(--rs-accent)"
+                           checked="@State.Settings.TtsAutoNextChapter"
+                           @onchange="OnTtsAutoNextChange" />
+                    <span>
+                        <span class="font-medium block">@L.T("settings.ttsAutoNext")</span>
+                        <span class="reader-muted text-[11px] leading-snug block mt-0.5">@L.T("settings.ttsAutoNextHint")</span>
+                    </span>
+                </label>
+
+                <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input type="checkbox" class="mt-0.5" style="accent-color:var(--rs-accent)"
+                           checked="@State.Settings.TtsAutoPlay"
+                           @onchange="OnTtsAutoPlayChange" />
+                    <span>
+                        <span class="font-medium block">@L.T("settings.ttsAutoPlay")</span>
+                        <span class="reader-muted text-[11px] leading-snug block mt-0.5">@L.T("settings.ttsAutoPlayHint")</span>
+                    </span>
+                </label>
 
                 <div>
                     <label class="block font-medium reader-muted mb-1.5">@L.T("settings.ttsVoiceLang")</label>
@@ -442,6 +492,48 @@
     private Task OnMarginInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.PageMargin = (int)v);
     private Task OnTtsRateInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.TtsRate = v);
 
+    private Task OnRestoreScrollChange(ChangeEventArgs e)
+    {
+        var s = CloneSettings();
+        s.RestoreScrollPosition = IsChecked(e);
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private Task OnRestoreTtsChange(ChangeEventArgs e)
+    {
+        var s = CloneSettings();
+        s.RestoreTtsPosition = IsChecked(e);
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private Task OnTtsAutoNextChange(ChangeEventArgs e)
+    {
+        var s = CloneSettings();
+        s.TtsAutoNextChapter = IsChecked(e);
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private Task OnTtsAutoPlayChange(ChangeEventArgs e)
+    {
+        var s = CloneSettings();
+        s.TtsAutoPlay = IsChecked(e);
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private Task OnInfiniteScrollChange(ChangeEventArgs e)
+    {
+        var s = CloneSettings();
+        s.InfiniteScroll = IsChecked(e);
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private static bool IsChecked(ChangeEventArgs e) => e.Value switch
+    {
+        bool b => b,
+        string s => s is "true" or "on" or "True",
+        _ => false
+    };
+
     private Task OnTtsLanguageChange(ChangeEventArgs e)
     {
         var s = CloneSettings();
@@ -475,6 +567,11 @@
         TtsRate = State.Settings.TtsRate,
         TtsLanguageOverride = State.Settings.TtsLanguageOverride,
         PiperVoiceId = State.Settings.PiperVoiceId,
+        RestoreScrollPosition = State.Settings.RestoreScrollPosition,
+        RestoreTtsPosition = State.Settings.RestoreTtsPosition,
+        TtsAutoNextChapter = State.Settings.TtsAutoNextChapter,
+        TtsAutoPlay = State.Settings.TtsAutoPlay,
+        InfiniteScroll = State.Settings.InfiniteScroll,
         UiLanguage = State.Settings.UiLanguage
     };
 }

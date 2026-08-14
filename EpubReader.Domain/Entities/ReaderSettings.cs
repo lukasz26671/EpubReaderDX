@@ -20,6 +20,16 @@ public class ReaderSettings
     public string? TtsLanguageOverride { get; set; }
     /// <summary>Piper voice id, e.g. en_US-lessac-high. Null = default.</summary>
     public string? PiperVoiceId { get; set; }
+    /// <summary>Restore scroll ratio when reopening a book/chapter.</summary>
+    public bool RestoreScrollPosition { get; set; } = true;
+    /// <summary>Resume TTS from the last saved chunk in the chapter.</summary>
+    public bool RestoreTtsPosition { get; set; } = true;
+    /// <summary>After TTS finishes a chapter, advance to the next one.</summary>
+    public bool TtsAutoNextChapter { get; set; }
+    /// <summary>After auto-next (or when AutoPlay alone finishes), start reading the next chapter.</summary>
+    public bool TtsAutoPlay { get; set; }
+    /// <summary>Overscroll a large pad at chapter end/start to go next/previous.</summary>
+    public bool InfiniteScroll { get; set; } = true;
 
     public UiLanguageKind UiLanguage { get; set; } = UiLanguageKind.Auto;
 }

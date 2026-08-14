@@ -51,8 +51,18 @@
     {
         var chapter = State.CurrentChapter;
         var pad = $"padding-left:max(1rem, var(--reader-page-margin)); padding-right:max(1rem, var(--reader-page-margin));";
-        <div id="reader-scroll" class="flex-1 overflow-y-auto py-6 scroll-smooth" style="@pad" @onclick="OnReaderClick">
-            <div class="reader-column mx-auto min-h-full flex flex-col justify-between reader-column--nav">
+        <div id="reader-scroll"
+             class="flex-1 overflow-y-auto py-6 @(State.Settings.InfiniteScroll ? null : "scroll-smooth")"
+             style="@pad"
+             data-infinite="@(State.Settings.InfiniteScroll ? "1" : "0")"
+             @onclick="OnReaderClick">
+            <div class="reader-column mx-auto min-h-full flex flex-col @(State.Settings.InfiniteScroll ? null : "justify-between") reader-column--nav">
+                @if (State.Settings.InfiniteScroll && State.CurrentChapterIndex > 0)
+                {
+                    <div class="infinite-pad infinite-pad--prev" aria-hidden="true">
+                        <span>@L.T("viewport.infinitePrev")</span>
+                    </div>
+                }
                 <div class="reader-border border-b pb-4 mb-6 flex items-center justify-between gap-3 text-xs reader-muted">
                     <div class="min-w-0">
                         <p class="truncate font-medium" style="color:var(--rs-text)">@chapter.Title</p>
@@ -98,6 +108,12 @@
                         <i data-lucide="chevron-right" class="w-4 h-4"></i>
                     </button>
                 </div>
+                @if (State.Settings.InfiniteScroll && State.CurrentChapterIndex < State.Book!.Chapters.Count - 1)
+                {
+                    <div class="infinite-pad infinite-pad--next" aria-hidden="true">
+                        <span>@L.T("viewport.infiniteNext")</span>
+                    </div>
+                }
             </div>
         </div>
     }

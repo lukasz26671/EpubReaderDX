@@ -82,9 +82,17 @@ window.epubReaderLastBook = {
 };
 
 window.epubReaderFile = {
+    isEpubFile: function (file) {
+        if (!file) return false;
+        var name = (file.name || '').toLowerCase();
+        if (name.endsWith('.epub')) return true;
+        var type = (file.type || '').toLowerCase();
+        return type === 'application/epub+zip';
+    },
+
     _readFile: function (file) {
         return new Promise(function (resolve) {
-            if (!file) {
+            if (!file || !window.epubReaderFile.isEpubFile(file)) {
                 resolve(null);
                 return;
             }
@@ -113,6 +121,10 @@ window.epubReaderFile = {
             input.accept = '.epub,application/epub+zip';
             input.onchange = function () {
                 var file = input.files && input.files[0];
+                if (file && !window.epubReaderFile.isEpubFile(file)) {
+                    resolve(null);
+                    return;
+                }
                 window.epubReaderFile._readFile(file).then(resolve);
             };
             input.oncancel = function () { resolve(null); };
@@ -123,17 +135,18 @@ window.epubReaderFile = {
         return window.epubReaderFile._readFile(file);
     },
 
-    fromDataTransferJson: function (dataTransfer) {
-        if (!dataTransfer || !dataTransfer.files || !dataTransfer.files.length) {
-            return Promise.resolve(null);
-        }
+    findEpubInDataTransfer: function (dataTransfer) {
+        if (!dataTransfer || !dataTransfer.files || !dataTransfer.files.length) return null;
         var files = Array.prototype.slice.call(dataTransfer.files);
-        var file = files.find(function (f) {
-            var name = (f.name || '').toLowerCase();
-            return name.endsWith('.epub')
-                || f.type === 'application/epub+zip'
-                || f.type === 'application/zip';
-        }) || files[0];
+        for (var i = 0; i < files.length; i++) {
+            if (window.epubReaderFile.isEpubFile(files[i])) return files[i];
+        }
+        return null;
+    },
+
+    fromDataTransferJson: function (dataTransfer) {
+        var file = window.epubReaderFile.findEpubInDataTransfer(dataTransfer);
+        if (!file) return Promise.resolve(null);
         return window.epubReaderFile._readFile(file).then(function (obj) {
             return obj ? JSON.stringify(obj) : null;
         });
@@ -209,7 +222,13 @@ window.epubReaderUi = {
     _touchCancelHandler: null,
     _dragDepth: 0,
     _scrollTimer: null,
+    _scrollEl: null,
+    _scrollHandler: null,
+    _visibilityHandler: null,
+    _pageHideHandler: null,
     _touch: null,
+    _infiniteLock: false,
+    _infiniteArmed: false,
 
     createIcons: function () {
         if (window.lucide && typeof window.lucide.createIcons === 'function') {
@@ -233,9 +252,34 @@ window.epubReaderUi = {
         }
     },
 
+    holdInfiniteScroll: function () {
+        this._infiniteLock = true;
+        this._infiniteArmed = false;
+        var el = document.getElementById('reader-scroll');
+        if (el) {
+            el.style.scrollBehavior = 'auto';
+            el.scrollTop = 0;
+        }
+    },
+
     scrollReaderTop: function () {
         var el = document.getElementById('reader-scroll');
-        if (el) el.scrollTop = 0;
+        if (el) {
+            el.style.scrollBehavior = 'auto';
+            var range = this._contentScrollRange(el);
+            el.scrollTop = range ? range.start : 0;
+        }
+        this._parkInfinite();
+    },
+
+    scrollReaderContentEnd: function () {
+        var el = document.getElementById('reader-scroll');
+        if (el) {
+            el.style.scrollBehavior = 'auto';
+            var range = this._contentScrollRange(el);
+            el.scrollTop = range ? range.start + range.max : Math.max(0, el.scrollHeight - el.clientHeight);
+        }
+        this._parkInfinite();
     },
 
     scrollToFragment: function (fragment) {
@@ -246,7 +290,8 @@ window.epubReaderUi = {
             || root.querySelector('[name="' + fragment.replace(/"/g, '\\"') + '"]')
             || document.getElementById(fragment);
         if (!target) return false;
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+        this._parkInfinite();
         return true;
     },
 
@@ -265,16 +310,152 @@ window.epubReaderUi = {
     getScrollRatio: function () {
         var el = document.getElementById('reader-scroll');
         if (!el) return 0;
-        var max = el.scrollHeight - el.clientHeight;
-        if (max <= 0) return 0;
-        return el.scrollTop / max;
+        var range = this._contentScrollRange(el);
+        if (!range || range.max <= 0) return 0;
+        return Math.max(0, Math.min(1, (el.scrollTop - range.start) / range.max));
     },
 
     setScrollRatio: function (ratio) {
         var el = document.getElementById('reader-scroll');
         if (!el) return;
-        var max = el.scrollHeight - el.clientHeight;
-        el.scrollTop = Math.max(0, Math.min(1, ratio || 0)) * max;
+        var range = this._contentScrollRange(el);
+        if (!range) {
+            var max = el.scrollHeight - el.clientHeight;
+            el.scrollTop = Math.max(0, Math.min(1, ratio || 0)) * Math.max(0, max);
+        } else {
+            el.scrollTop = range.start + Math.max(0, Math.min(1, ratio || 0)) * range.max;
+        }
+        this._parkInfinite();
+    },
+
+    _relTop: function (container, node) {
+        return node.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    },
+
+    _contentScrollRange: function (el) {
+        if (!el) return null;
+        var prev = el.querySelector('.infinite-pad--prev');
+        var next = el.querySelector('.infinite-pad--next');
+        var start = 0;
+        if (prev) start = this._relTop(el, prev) + prev.offsetHeight;
+        var endLimit = el.scrollHeight - el.clientHeight;
+        if (next) {
+            var nextTop = this._relTop(el, next);
+            endLimit = Math.min(endLimit, nextTop - el.clientHeight);
+        }
+        var max = Math.max(0, endLimit - start);
+        return { start: start, max: max };
+    },
+
+    _snapInfiniteContent: function (el) {
+        if (!el) return;
+        var range = this._contentScrollRange(el);
+        if (!range) return;
+        var t = el.scrollTop;
+        if (t < range.start) el.scrollTop = range.start;
+        else if (t > range.start + range.max) el.scrollTop = range.start + range.max;
+    },
+
+    _parkInfinite: function () {
+        this._infiniteLock = true;
+        this._infiniteArmed = false;
+        this.ensureScrollPersist();
+        var el = document.getElementById('reader-scroll');
+        if (el) {
+            el.style.scrollBehavior = 'auto';
+            this._snapInfiniteContent(el);
+        }
+        var self = this;
+        requestAnimationFrame(function () {
+            var node = document.getElementById('reader-scroll');
+            if (node) {
+                node.style.scrollBehavior = 'auto';
+                self._snapInfiniteContent(node);
+            }
+            requestAnimationFrame(function () {
+                var again = document.getElementById('reader-scroll');
+                if (again) {
+                    self._snapInfiniteContent(again);
+                    again.style.scrollBehavior = '';
+                }
+                self._infiniteLock = false;
+                self._infiniteArmed = false;
+            });
+        });
+    },
+
+    _infiniteNeed: function (el) {
+        return Math.max(el.clientHeight * 0.62, 320);
+    },
+
+    _inInfiniteContent: function (el) {
+        var range = this._contentScrollRange(el);
+        if (!range) return true;
+        var t = el.scrollTop;
+        var slack = 20;
+        return t >= range.start - slack && t <= range.start + range.max + slack;
+    },
+
+    _checkInfiniteScroll: function () {
+        if (this._infiniteLock) return;
+        var el = this._scrollEl || document.getElementById('reader-scroll');
+        if (!el || el.getAttribute('data-infinite') !== '1' || !this._dotNetRef) return;
+
+        if (!this._infiniteArmed) {
+            if (this._inInfiniteContent(el)) this._infiniteArmed = true;
+            return;
+        }
+
+        var need = this._infiniteNeed(el);
+        var next = el.querySelector('.infinite-pad--next');
+        if (next) {
+            var intoNext = el.scrollTop + el.clientHeight - this._relTop(el, next);
+            if (intoNext >= need) {
+                this._infiniteLock = true;
+                this._infiniteArmed = false;
+                this._dotNetRef.invokeMethodAsync('OnInfiniteChapter', 1);
+                return;
+            }
+        }
+
+        var prev = el.querySelector('.infinite-pad--prev');
+        if (prev) {
+            var contentStart = this._relTop(el, prev) + prev.offsetHeight;
+            var intoPrev = contentStart - el.scrollTop;
+            if (intoPrev >= need) {
+                this._infiniteLock = true;
+                this._infiniteArmed = false;
+                this._dotNetRef.invokeMethodAsync('OnInfiniteChapter', -1);
+            }
+        }
+    },
+
+    _flushScrollPosition: function () {
+        if (!this._dotNetRef) return;
+        try {
+            this._dotNetRef.invokeMethodAsync('OnReaderScroll', this.getScrollRatio());
+        } catch (e) { /* ignore */ }
+    },
+
+    ensureScrollPersist: function () {
+        var el = document.getElementById('reader-scroll');
+        if (!el) return;
+        if (this._scrollEl === el && this._scrollHandler) return;
+
+        if (this._scrollEl && this._scrollHandler) {
+            try { this._scrollEl.removeEventListener('scroll', this._scrollHandler); } catch (e) { /* ignore */ }
+        }
+
+        var self = this;
+        this._scrollEl = el;
+        this._scrollHandler = function () {
+            self._checkInfiniteScroll();
+            if (self._scrollTimer) clearTimeout(self._scrollTimer);
+            self._scrollTimer = setTimeout(function () {
+                self._flushScrollPosition();
+            }, 350);
+        };
+        el.addEventListener('scroll', this._scrollHandler, { passive: true });
     },
 
     pageScroll: function (direction) {
@@ -282,10 +463,31 @@ window.epubReaderUi = {
         if (!el) return 'none';
         var amount = Math.max(120, el.clientHeight * 0.9);
         var before = el.scrollTop;
+        var infinite = el.getAttribute('data-infinite') === '1';
         if (direction > 0) {
+            if (infinite) {
+                var next = el.querySelector('.infinite-pad--next');
+                if (next) {
+                    var nextTop = this._relTop(el, next);
+                    var projected = before + amount + el.clientHeight - nextTop;
+                    if (projected >= this._infiniteNeed(el)) return 'end';
+                    el.scrollBy({ top: amount, behavior: 'smooth' });
+                    return 'scrolled';
+                }
+            }
             el.scrollBy({ top: amount, behavior: 'smooth' });
             if (before + el.clientHeight >= el.scrollHeight - 4) return 'end';
         } else {
+            if (infinite) {
+                var prev = el.querySelector('.infinite-pad--prev');
+                if (prev) {
+                    var contentStart = this._relTop(el, prev) + prev.offsetHeight;
+                    var projectedUp = contentStart - (before - amount);
+                    if (projectedUp >= this._infiniteNeed(el)) return 'start';
+                    el.scrollBy({ top: -amount, behavior: 'smooth' });
+                    return 'scrolled';
+                }
+            }
             el.scrollBy({ top: -amount, behavior: 'smooth' });
             if (before <= 2) return 'start';
         }
@@ -304,6 +506,47 @@ window.epubReaderUi = {
             if (types[i] === 'Files') return true;
         }
         return false;
+    },
+
+    /** true / false / null (unknown — browser hid file details during drag). */
+    _epubDragState: function (e) {
+        var dt = e.dataTransfer;
+        if (!dt) return false;
+
+        if (dt.files && dt.files.length) {
+            return !!window.epubReaderFile.findEpubInDataTransfer(dt);
+        }
+
+        var items = dt.items;
+        if (!items || !items.length) return this._hasFiles(e) ? null : false;
+
+        var sawFile = false;
+        var sawEpub = false;
+        var sawOther = false;
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (item.kind !== 'file') continue;
+            sawFile = true;
+            var type = (item.type || '').toLowerCase();
+            if (type === 'application/epub+zip') {
+                sawEpub = true;
+                continue;
+            }
+            var file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
+            if (file) {
+                if (window.epubReaderFile.isEpubFile(file)) sawEpub = true;
+                else sawOther = true;
+                continue;
+            }
+            if (type && type !== 'application/octet-stream' && type !== 'application/zip') {
+                sawOther = true;
+            }
+        }
+
+        if (!sawFile) return false;
+        if (sawEpub) return true;
+        if (sawOther) return false;
+        return null;
     },
 
     _hotkey: function (payload) {
@@ -327,6 +570,15 @@ window.epubReaderUi = {
         this._dotNetRef = dotNetRef;
         this._dragDepth = 0;
         this._touch = null;
+
+        var self = this;
+        this._visibilityHandler = function () {
+            if (document.visibilityState === 'hidden') self._flushScrollPosition();
+        };
+        this._pageHideHandler = function () { self._flushScrollPosition(); };
+        document.addEventListener('visibilitychange', this._visibilityHandler);
+        window.addEventListener('pagehide', this._pageHideHandler);
+        this.ensureScrollPersist();
 
         this._clickHandler = function (e) {
             var a = e.target && e.target.closest ? e.target.closest('a[data-epub-href]') : null;
@@ -379,6 +631,12 @@ window.epubReaderUi = {
 
         this._dragEnterHandler = function (e) {
             if (!window.epubReaderUi._hasFiles(e)) return;
+            var state = window.epubReaderUi._epubDragState(e);
+            if (state === false) {
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+                return;
+            }
             e.preventDefault();
             window.epubReaderUi._dragDepth += 1;
             if (window.epubReaderUi._dragDepth === 1) {
@@ -387,8 +645,15 @@ window.epubReaderUi = {
         };
         this._dragOverHandler = function (e) {
             if (!window.epubReaderUi._hasFiles(e)) return;
+            var state = window.epubReaderUi._epubDragState(e);
             e.preventDefault();
-            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            if (e.dataTransfer) {
+                e.dataTransfer.dropEffect = state === false ? 'none' : 'copy';
+            }
+            if (state === false && window.epubReaderUi._dragDepth > 0) {
+                window.epubReaderUi._dragDepth = 0;
+                window.epubReaderUi._setDropActive(false);
+            }
         };
         this._dragLeaveHandler = function (e) {
             if (!window.epubReaderUi._hasFiles(e) && window.epubReaderUi._dragDepth === 0) return;
@@ -405,6 +670,12 @@ window.epubReaderUi = {
             window.epubReaderUi._dragDepth = 0;
             window.epubReaderUi._setDropActive(false);
             if (!window.epubReaderUi._dotNetRef) return;
+
+            if (!window.epubReaderFile.findEpubInDataTransfer(e.dataTransfer)) {
+                window.epubReaderUi._dotNetRef.invokeMethodAsync('OnNonEpubDropped');
+                return;
+            }
+
             window.epubReaderFile.fromDataTransferJson(e.dataTransfer).then(function (json) {
                 if (!json || !window.epubReaderUi._dotNetRef) return;
                 window.epubReaderUi._dotNetRef.invokeMethodAsync('OnEpubDropped', json);
@@ -497,6 +768,25 @@ window.epubReaderUi = {
     },
 
     unbind: function () {
+        if (this._scrollTimer) {
+            clearTimeout(this._scrollTimer);
+            this._scrollTimer = null;
+        }
+        if (this._scrollEl && this._scrollHandler) {
+            try { this._scrollEl.removeEventListener('scroll', this._scrollHandler); } catch (e) { /* ignore */ }
+        }
+        this._scrollEl = null;
+        this._scrollHandler = null;
+        this._infiniteLock = false;
+        this._infiniteArmed = false;
+        if (this._visibilityHandler) {
+            document.removeEventListener('visibilitychange', this._visibilityHandler);
+            this._visibilityHandler = null;
+        }
+        if (this._pageHideHandler) {
+            window.removeEventListener('pagehide', this._pageHideHandler);
+            this._pageHideHandler = null;
+        }
         if (this._clickHandler) {
             document.removeEventListener('click', this._clickHandler, true);
             this._clickHandler = null;
@@ -562,6 +852,7 @@ window.epubReaderTts = {
     _speakResolve: null,
     _speakReject: null,
     _audioResolve: null,
+    _audioReject: null,
     _preferNeural: false,
     _marks: [],
 
@@ -1130,9 +1421,17 @@ window.epubReaderTts = {
             } catch (e) { /* ignore */ }
             this._audio = null;
         }
-        if (this._audioResolve) {
-            this._audioResolve();
+        if (this._audioReject) {
+            var rej = this._audioReject;
             this._audioResolve = null;
+            this._audioReject = null;
+            try { rej(new DOMException('Aborted', 'AbortError')); } catch (e2) {
+                try { rej(new Error('Aborted')); } catch (e3) { /* ignore */ }
+            }
+        } else if (this._audioResolve) {
+            var r = this._audioResolve;
+            this._audioResolve = null;
+            r();
         }
     },
 
@@ -1161,14 +1460,17 @@ window.epubReaderTts = {
             var audio = new Audio('data:' + (mime || 'audio/mpeg') + ';base64,' + base64);
             self._audio = audio;
             self._audioResolve = resolve;
+            self._audioReject = reject;
             audio.onended = function () {
                 if (self._audio === audio) self._audio = null;
                 self._audioResolve = null;
+                self._audioReject = null;
                 resolve();
             };
             audio.onerror = function () {
                 if (self._audio === audio) self._audio = null;
                 self._audioResolve = null;
+                self._audioReject = null;
                 reject(new Error('Odtwarzanie audio nie powiodło się'));
             };
             var p = audio.play();
@@ -1176,6 +1478,7 @@ window.epubReaderTts = {
                 p.catch(function (err) {
                     if (self._audio === audio) self._audio = null;
                     self._audioResolve = null;
+                    self._audioReject = null;
                     reject(err || new Error('play blocked'));
                 });
             }

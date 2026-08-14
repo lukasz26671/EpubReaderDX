@@ -65,6 +65,7 @@ public sealed class TtsController : ITtsController
         TtsEngineKind preferredEngine,
         double rate,
         string? languageOverride,
+        int startChunkIndex = 0,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(plainText))
@@ -87,16 +88,9 @@ public sealed class TtsController : ITtsController
         DetectedLanguage = lang;
 
         _rate = Math.Clamp(rate, 0.5, 2.0);
-        // Sentence-sized chunks: highlight matches speech; speakQueue keeps playback smooth.
-        // Edge/Piper: larger packs = fewer synth round-trips.
-        // System: smaller sentence packs for highlight + speakQueue.
-        var chunkSize = preferredEngine switch
-        {
-            TtsEngineKind.System => 240,
-            TtsEngineKind.Piper => 700,
-            _ => 900
-        };
-        var chunks = TtsTextChunker.Chunk(plainText, chunkSize);
+        // Same packs as the GitHub build: Edge ~900, Piper ~700, System ~240; flush on paragraphs.
+        var (chunkSize, breakOnParagraph) = ChunkParams(preferredEngine);
+        var chunks = TtsTextChunker.Chunk(plainText, chunkSize, breakOnParagraph);
         if (chunks.Count == 0)
         {
             StatusMessage = _l.T("tts.noText");
@@ -112,6 +106,18 @@ public sealed class TtsController : ITtsController
             return;
         }
 
+        if (engine.Kind != preferredEngine)
+        {
+            (chunkSize, breakOnParagraph) = ChunkParams(engine.Kind);
+            chunks = TtsTextChunker.Chunk(plainText, chunkSize, breakOnParagraph);
+            if (chunks.Count == 0)
+            {
+                StatusMessage = _l.T("tts.noText");
+                Notify();
+                return;
+            }
+        }
+
         ActiveEngine = engine.Kind;
         if (engine.Kind == TtsEngineKind.Piper)
         {
@@ -120,7 +126,7 @@ public sealed class TtsController : ITtsController
         }
         _edgeFellBack = false;
         ChunkCount = chunks.Count;
-        CurrentChunkIndex = 0;
+        CurrentChunkIndex = Math.Clamp(startChunkIndex, 0, chunks.Count - 1);
         StatusMessage = string.IsNullOrWhiteSpace(note)
             ? _l.T("tts.playing", engine.DisplayName, lang)
             : note;
@@ -135,7 +141,7 @@ public sealed class TtsController : ITtsController
 
         try
         {
-            await PlayChunksAsync(engine, chunks, lang, cts.Token);
+            await PlayChunksAsync(engine, chunks, lang, cts.Token, CurrentChunkIndex);
             if (!cts.IsCancellationRequested)
                 StatusMessage = _l.T("tts.done");
         }
@@ -163,8 +169,8 @@ public sealed class TtsController : ITtsController
                         await Task.Delay(600, CancellationToken.None);
                         var piperChunks = TtsTextChunker.Chunk(plainText, 700);
                         ChunkCount = piperChunks.Count;
-                        CurrentChunkIndex = 0;
-                        await PlayChunksAsync(piper, piperChunks, lang, cts.Token);
+                        CurrentChunkIndex = Math.Clamp(startChunkIndex, 0, Math.Max(0, piperChunks.Count - 1));
+                        await PlayChunksAsync(piper, piperChunks, lang, cts.Token, CurrentChunkIndex);
                         if (!cts.IsCancellationRequested)
                             StatusMessage = _l.T("tts.done");
                         return;
@@ -188,8 +194,8 @@ public sealed class TtsController : ITtsController
                     {
                         var systemChunks = TtsTextChunker.Chunk(plainText, 240);
                         ChunkCount = systemChunks.Count;
-                        CurrentChunkIndex = 0;
-                        await PlayChunksAsync(system, systemChunks, lang, cts.Token);
+                        CurrentChunkIndex = Math.Clamp(startChunkIndex, 0, Math.Max(0, systemChunks.Count - 1));
+                        await PlayChunksAsync(system, systemChunks, lang, cts.Token, CurrentChunkIndex);
                         if (!cts.IsCancellationRequested)
                             StatusMessage = _l.T("tts.done");
                     }
@@ -228,13 +234,21 @@ public sealed class TtsController : ITtsController
         }
     }
 
+    private static (int MaxChars, bool BreakOnParagraph) ChunkParams(TtsEngineKind kind) => kind switch
+    {
+        TtsEngineKind.System => (240, true),
+        TtsEngineKind.Piper => (700, true),
+        _ => (900, true)
+    };
+
     private async Task PlayChunksAsync(
         ITtsEngine engine,
         IReadOnlyList<string> chunks,
         string lang,
-        CancellationToken ct)
+        CancellationToken ct,
+        int startIndex = 0)
     {
-        var i = 0;
+        var i = Math.Clamp(startIndex, 0, Math.Max(0, chunks.Count - 1));
         while (i < chunks.Count)
         {
             ct.ThrowIfCancellationRequested();
