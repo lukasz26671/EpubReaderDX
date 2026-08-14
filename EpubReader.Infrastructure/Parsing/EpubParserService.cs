@@ -381,7 +381,8 @@ public sealed class EpubParserService : IEpubParserService
                 Href = manifestItem.Href,
                 FullPath = manifestItem.FullPath,
                 RawHtml = rawHtml,
-                PlainText = HtmlToPlainTextConverter.Convert(rawHtml)
+                PlainText = HtmlToPlainTextConverter.Convert(rawHtml),
+                Language = ExtractHtmlLang(rawHtml)
             };
             chapter.FormattedLines = HtmlToPlainTextConverter.WrapLines(chapter.PlainText, 100);
             chapter.DisplayHtml = ChapterHtmlProcessor.BuildDisplayHtml(chapter, book);
@@ -514,6 +515,17 @@ public sealed class EpubParserService : IEpubParserService
         }
 
         return null;
+    }
+
+    private static string? ExtractHtmlLang(string html)
+    {
+        var m = Regex.Match(
+            html,
+            @"<html\b[^>]*?(?:xml:lang|lang)\s*=\s*[""']([^""']+)[""']",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!m.Success) return null;
+        var lang = m.Groups[1].Value.Trim();
+        return string.IsNullOrWhiteSpace(lang) ? null : lang;
     }
 
     private static bool IsDocument(EpubManifestItem item) =>

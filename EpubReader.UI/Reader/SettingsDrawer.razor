@@ -379,7 +379,9 @@
             if (!string.IsNullOrWhiteSpace(Tts.DetectedLanguage))
                 return Tts.DetectedLanguage;
             if (State.CurrentChapter is null) return "—";
-            return LangDetect.Detect(State.Book?.Metadata.Language, State.CurrentChapter.PlainText);
+            return LangDetect.Detect(
+                State.CurrentChapter.Language ?? State.Book?.Metadata.Language,
+                State.CurrentChapter.PlainText);
         }
     }
 

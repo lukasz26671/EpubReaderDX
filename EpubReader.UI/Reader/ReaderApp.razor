@@ -480,7 +480,7 @@
         if (!State.HasBook || State.CurrentChapter is null) return;
         await Tts.PlayChapterAsync(
             State.CurrentChapter.PlainText,
-            State.Book?.Metadata.Language,
+            State.CurrentChapter.Language ?? State.Book?.Metadata.Language,
             State.Settings.TtsEngine,
             State.Settings.TtsRate,
             State.Settings.TtsLanguageOverride,

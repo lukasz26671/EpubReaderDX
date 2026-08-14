@@ -229,6 +229,13 @@ window.epubReaderUi = {
     _touch: null,
     _infiniteLock: false,
     _infiniteArmed: false,
+    _infiniteWasInContent: false,
+    _infiniteCoolUntil: 0,
+    _infinitePull: null,
+    _infiniteTouchStart: null,
+    _infiniteTouchMove: null,
+    _infiniteTouchEnd: null,
+    _infiniteWheel: null,
 
     createIcons: function () {
         if (window.lucide && typeof window.lucide.createIcons === 'function') {
@@ -255,6 +262,9 @@ window.epubReaderUi = {
     holdInfiniteScroll: function () {
         this._infiniteLock = true;
         this._infiniteArmed = false;
+        this._infiniteWasInContent = false;
+        this._infiniteCoolUntil = Date.now() + 500;
+        this._infinitePull = null;
         var el = document.getElementById('reader-scroll');
         if (el) {
             el.style.scrollBehavior = 'auto';
@@ -359,6 +369,9 @@ window.epubReaderUi = {
     _parkInfinite: function () {
         this._infiniteLock = true;
         this._infiniteArmed = false;
+        this._infiniteWasInContent = false;
+        this._infiniteCoolUntil = Date.now() + 500;
+        this._infinitePull = null;
         this.ensureScrollPersist();
         var el = document.getElementById('reader-scroll');
         if (el) {
@@ -380,40 +393,68 @@ window.epubReaderUi = {
                 }
                 self._infiniteLock = false;
                 self._infiniteArmed = false;
+                self._infiniteWasInContent = false;
             });
         });
     },
 
     _infiniteNeed: function (el) {
-        return Math.max(el.clientHeight * 0.62, 320);
+        var h = el.clientHeight || 600;
+        var touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+        return touch ? Math.max(h * 0.42, 200) : Math.max(h * 0.55, 280);
     },
 
     _inInfiniteContent: function (el) {
         var range = this._contentScrollRange(el);
         if (!range) return true;
         var t = el.scrollTop;
-        var slack = 20;
+        var slack = 28;
         return t >= range.start - slack && t <= range.start + range.max + slack;
+    },
+
+    _atContentEnd: function (el) {
+        var range = this._contentScrollRange(el);
+        if (!range) return el.scrollTop + el.clientHeight >= el.scrollHeight - 6;
+        return el.scrollTop >= range.start + range.max - 12;
+    },
+
+    _atContentStart: function (el) {
+        var range = this._contentScrollRange(el);
+        if (!range) return el.scrollTop <= 6;
+        return el.scrollTop <= range.start + 12;
+    },
+
+    _fireInfinite: function (dir) {
+        if (this._infiniteLock || !this._dotNetRef) return;
+        this._infiniteLock = true;
+        this._infiniteArmed = false;
+        this._infiniteWasInContent = false;
+        this._infinitePull = null;
+        this._infiniteCoolUntil = Date.now() + 700;
+        this._dotNetRef.invokeMethodAsync('OnInfiniteChapter', dir);
     },
 
     _checkInfiniteScroll: function () {
         if (this._infiniteLock) return;
+        if (Date.now() < this._infiniteCoolUntil) return;
         var el = this._scrollEl || document.getElementById('reader-scroll');
         if (!el || el.getAttribute('data-infinite') !== '1' || !this._dotNetRef) return;
 
-        if (!this._infiniteArmed) {
-            if (this._inInfiniteContent(el)) this._infiniteArmed = true;
+        var inContent = this._inInfiniteContent(el);
+        if (inContent) {
+            this._infiniteWasInContent = true;
+            this._infiniteArmed = true;
             return;
         }
+
+        if (!this._infiniteWasInContent && !this._infiniteArmed) return;
 
         var need = this._infiniteNeed(el);
         var next = el.querySelector('.infinite-pad--next');
         if (next) {
             var intoNext = el.scrollTop + el.clientHeight - this._relTop(el, next);
             if (intoNext >= need) {
-                this._infiniteLock = true;
-                this._infiniteArmed = false;
-                this._dotNetRef.invokeMethodAsync('OnInfiniteChapter', 1);
+                this._fireInfinite(1);
                 return;
             }
         }
@@ -422,12 +463,86 @@ window.epubReaderUi = {
         if (prev) {
             var contentStart = this._relTop(el, prev) + prev.offsetHeight;
             var intoPrev = contentStart - el.scrollTop;
-            if (intoPrev >= need) {
-                this._infiniteLock = true;
-                this._infiniteArmed = false;
-                this._dotNetRef.invokeMethodAsync('OnInfiniteChapter', -1);
-            }
+            if (intoPrev >= need) this._fireInfinite(-1);
         }
+    },
+
+    _bindInfinitePull: function (el) {
+        this._unbindInfinitePull();
+        if (!el) return;
+        var self = this;
+        this._infiniteTouchStart = function (e) {
+            if (!e.touches || e.touches.length !== 1) return;
+            if (el.getAttribute('data-infinite') !== '1') return;
+            self._infinitePull = { y: e.touches[0].clientY, acc: 0 };
+        };
+        this._infiniteTouchMove = function (e) {
+            if (self._infiniteLock || Date.now() < self._infiniteCoolUntil) return;
+            var pull = self._infinitePull;
+            if (!pull || !e.touches || e.touches.length !== 1) return;
+            if (el.getAttribute('data-infinite') !== '1') return;
+            var y = e.touches[0].clientY;
+            var dy = pull.y - y;
+            pull.y = y;
+            if (Math.abs(dy) < 0.5) return;
+
+            var next = el.querySelector('.infinite-pad--next');
+            var prev = el.querySelector('.infinite-pad--prev');
+            var intoNext = next ? (el.scrollTop + el.clientHeight - self._relTop(el, next)) : 0;
+            var intoPrev = prev ? (self._relTop(el, prev) + prev.offsetHeight - el.scrollTop) : 0;
+            var pullingNext = dy > 0 && next && (self._atContentEnd(el) || intoNext > 8);
+            var pullingPrev = dy < 0 && prev && (self._atContentStart(el) || intoPrev > 8);
+
+            if (pullingNext) {
+                pull.acc += dy;
+                if (pull.acc >= self._infiniteNeed(el)) self._fireInfinite(1);
+            } else if (pullingPrev) {
+                pull.acc += -dy;
+                if (pull.acc >= self._infiniteNeed(el)) self._fireInfinite(-1);
+            } else {
+                pull.acc = 0;
+            }
+        };
+        this._infiniteTouchEnd = function () {
+            self._infinitePull = null;
+        };
+        this._infiniteWheel = function (e) {
+            if (self._infiniteLock || Date.now() < self._infiniteCoolUntil) return;
+            if (el.getAttribute('data-infinite') !== '1') return;
+            if (e.deltaY > 0 && self._atContentEnd(el) && el.querySelector('.infinite-pad--next')) {
+                if (!self._infinitePull) self._infinitePull = { y: 0, acc: 0 };
+                self._infinitePull.acc += e.deltaY;
+                if (self._infinitePull.acc >= self._infiniteNeed(el)) self._fireInfinite(1);
+            } else if (e.deltaY < 0 && self._atContentStart(el) && el.querySelector('.infinite-pad--prev')) {
+                if (!self._infinitePull) self._infinitePull = { y: 0, acc: 0 };
+                self._infinitePull.acc += -e.deltaY;
+                if (self._infinitePull.acc >= self._infiniteNeed(el)) self._fireInfinite(-1);
+            } else {
+                self._infinitePull = null;
+            }
+        };
+        el.addEventListener('touchstart', this._infiniteTouchStart, { passive: true });
+        el.addEventListener('touchmove', this._infiniteTouchMove, { passive: true });
+        el.addEventListener('touchend', this._infiniteTouchEnd, { passive: true });
+        el.addEventListener('touchcancel', this._infiniteTouchEnd, { passive: true });
+        el.addEventListener('wheel', this._infiniteWheel, { passive: true });
+    },
+
+    _unbindInfinitePull: function () {
+        var el = this._scrollEl;
+        if (!el) return;
+        if (this._infiniteTouchStart) el.removeEventListener('touchstart', this._infiniteTouchStart);
+        if (this._infiniteTouchMove) el.removeEventListener('touchmove', this._infiniteTouchMove);
+        if (this._infiniteTouchEnd) {
+            el.removeEventListener('touchend', this._infiniteTouchEnd);
+            el.removeEventListener('touchcancel', this._infiniteTouchEnd);
+        }
+        if (this._infiniteWheel) el.removeEventListener('wheel', this._infiniteWheel);
+        this._infiniteTouchStart = null;
+        this._infiniteTouchMove = null;
+        this._infiniteTouchEnd = null;
+        this._infiniteWheel = null;
+        this._infinitePull = null;
     },
 
     _flushScrollPosition: function () {
@@ -442,6 +557,7 @@ window.epubReaderUi = {
         if (!el) return;
         if (this._scrollEl === el && this._scrollHandler) return;
 
+        this._unbindInfinitePull();
         if (this._scrollEl && this._scrollHandler) {
             try { this._scrollEl.removeEventListener('scroll', this._scrollHandler); } catch (e) { /* ignore */ }
         }
@@ -456,6 +572,7 @@ window.epubReaderUi = {
             }, 350);
         };
         el.addEventListener('scroll', this._scrollHandler, { passive: true });
+        this._bindInfinitePull(el);
     },
 
     pageScroll: function (direction) {
@@ -775,10 +892,12 @@ window.epubReaderUi = {
         if (this._scrollEl && this._scrollHandler) {
             try { this._scrollEl.removeEventListener('scroll', this._scrollHandler); } catch (e) { /* ignore */ }
         }
+        this._unbindInfinitePull();
         this._scrollEl = null;
         this._scrollHandler = null;
         this._infiniteLock = false;
         this._infiniteArmed = false;
+        this._infiniteWasInContent = false;
         if (this._visibilityHandler) {
             document.removeEventListener('visibilitychange', this._visibilityHandler);
             this._visibilityHandler = null;

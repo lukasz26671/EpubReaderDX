@@ -76,9 +76,10 @@ public sealed class LanguageDetector : ILanguageDetector
             "why", "what", "who", "where", "when", "how", "the", "this", "these", "those",
             "is", "are", "was", "were", "have", "has", "will", "would", "could", "should",
             "hello", "thanks", "please", "because", "they", "them", "their", "yeah", "wow",
-            "don't", "can't", "it's", "i'm", "you're", "we're", "isn't", "aren't", "that's",
-            "what's", "with", "from", "your", "his", "her", "our", "english", "okay", "yes",
-            "hello", "hey", "please", "thanks"
+            "with", "from", "your", "his", "her", "our", "english", "okay", "yes",
+            "hey", "and", "but", "not", "for", "that", "you", "been", "its",
+            "home", "listen", "ready", "next", "most", "does", "did", "said", "she",
+            "lights", "light", "shout", "polite", "path", "walking"
         };
 
     private static readonly HashSet<string> PlCue =
@@ -88,28 +89,39 @@ public sealed class LanguageDetector : ILanguageDetector
             "jak", "ale", "tego", "tej", "tym", "będzie", "mogę", "może", "mogą", "już",
             "jeszcze", "bardzo", "tylko", "też", "przez", "również", "więc", "ponieważ",
             "które", "który", "która", "których", "proszę", "dziękuję", "cześć", "dzień",
-            "polski", "polska", "lubię", "chcę", "gdzie", "kiedy", "dlaczego"
+            "polski", "polska", "lubię", "chcę", "gdzie", "kiedy", "dlaczego",
+            "powrót", "wrócić", "wrócił", "wróciła", "wróciło", "wrócili", "mógł", "góra",
+            "początku", "ścieżką", "latarnia", "mgła", "kieszeni", "schowała", "ją"
         };
 
     private static readonly HashSet<string> DeCue =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "und", "der", "die", "das", "ich", "nicht", "ist", "sind", "warum", "bitte",
-            "danke", "ein", "eine", "nicht", "sie", "wir", "nicht"
+            "und", "der", "die", "das", "den", "dem", "ich", "nicht", "ist", "sind", "warum",
+            "bitte", "danke", "ein", "eine", "auf", "mit", "von", "zu", "im", "war",
+            "sich", "wir", "sie", "auch", "nach", "bei", "weg", "pfad"
         };
 
     private static readonly HashSet<string> EsCue =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "que", "los", "las", "una", "por", "para", "está", "son", "porque", "gracias",
-            "hola", "está", "están", "también"
+            "el", "la", "los", "las", "un", "una", "uno", "del", "al", "de", "en", "es",
+            "con", "por", "para", "como", "más", "pero", "quien", "había", "puede", "pueden",
+            "también", "está", "están", "este", "esta", "eso", "aquí", "muy", "todo",
+            "cuando", "donde", "sobre", "entre", "hasta", "desde", "sin", "sus", "que",
+            "gracias", "hola", "llegó", "tenía", "estaba", "después", "entonces", "porque",
+            "le", "lo", "se", "su", "mi", "tu", "ya", "yo", "hay", "fue", "era",
+            "casa", "luz", "nota", "camino", "dijo", "ahora", "volver", "ligero",
+            "orilla", "arena", "linterna", "quien", "trae", "quedarse",
+            "sonrió", "bebió", "miró", "sabía", "limón", "pequeña"
         };
 
     private static readonly HashSet<string> FrCue =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "les", "une", "des", "est", "sont", "pas", "pour", "dans", "que", "qui",
-            "merci", "pourquoi", "bonjour", "avec", "mais"
+            "les", "une", "des", "est", "sont", "pas", "pour", "dans", "qui", "avec",
+            "mais", "aux", "ces", "son", "merci", "pourquoi", "bonjour", "une", "elle",
+            "nous", "vous", "plus", "tout", "cette", "aussi"
         };
 
     public string DetectLocal(string? text, string fallback)
@@ -121,25 +133,16 @@ public sealed class LanguageDetector : ILanguageDetector
         if (script is not null && IsStrongScript(script))
             return script;
 
+        // Latin scores beat a lone Polish diacritic inherited from a nav word in the same snippet.
+        var latin = ScoreLatinLanguage(sample);
+        if (latin is not null)
+            return latin;
+
         if (script == "pl")
             return "pl";
 
-        var (best, bestScore, secondScore) = ScoreCueWords(sample);
-        var words = CountWords(sample);
-        var letters = CountLetters(sample);
-
-        // Whole-snippet cues: "Why" / "tak" are obvious; "no" is PL filler and EN negation → keep fallback.
-        if (words <= 3 || letters <= 16)
-        {
-            if (IsAmbiguousShort(sample))
-                return fallback;
-            if (best is not null && bestScore >= 1 && bestScore > secondScore)
-                return best;
+        if (IsAmbiguousShort(sample))
             return fallback;
-        }
-
-        if (best is not null && bestScore >= 1 && bestScore > secondScore)
-            return best;
 
         return script ?? fallback;
     }
@@ -150,56 +153,46 @@ public sealed class LanguageDetector : ILanguageDetector
     {
         if (chunks.Count == 0) return [];
         var fb = string.IsNullOrWhiteSpace(fallback) ? "en" : fallback;
-        var result = new List<(string, string)>();
+        var result = new List<(string Text, string Language)>();
+        string? carry = null;
 
         foreach (var chunk in chunks)
         {
-            var pieces = SplitSpeakable(chunk);
-            string? runLang = null;
-            var run = new List<string>();
-
-            void Flush()
+            foreach (var piece in SplitSpeakable(chunk))
             {
-                if (run.Count == 0 || runLang is null) return;
-                result.Add((string.Join(" ", run).Trim(), runLang));
-                run.Clear();
-            }
-
-            foreach (var piece in pieces)
-            {
-                var lang = DetectLocal(piece, fb);
-                if (runLang is null)
+                var lang = DetectLocal(piece, carry ?? fb);
+                carry = lang;
+                if (result.Count > 0)
                 {
-                    runLang = lang;
-                    run.Add(piece);
-                    continue;
+                    var last = result[^1];
+                    // Keep mixed-language chapters in short voice runs; same-lang sentences may pack a little.
+                    if (last.Language == lang && last.Text.Length + piece.Length < 140)
+                    {
+                        result[^1] = (last.Text + " " + piece, lang);
+                        continue;
+                    }
                 }
 
-                if (lang == runLang)
-                {
-                    run.Add(piece);
-                    continue;
-                }
-
-                Flush();
-                runLang = lang;
-                run.Add(piece);
+                result.Add((piece, lang));
             }
-
-            Flush();
         }
 
         return result;
     }
 
+    private static readonly HashSet<string> AmbiguousShort =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "no", "ok", "a", "i", "to", "do", "on", "we", "or", "an", "at", "as", "so",
+            "be", "if", "he", "me", "my", "it", "up", "by", "hat", "die", "war", "was",
+            "hay", "era", "fast", "also", "kind", "wind", "land", "name", "hand", "man",
+            "in", "am", "us", "will", "most"
+        };
+
     private static bool IsAmbiguousShort(string sample)
     {
-        var t = sample.Trim().TrimEnd('.', '!', '?', '…', '"', '\'', '”', '“').Trim();
-        return t.Equals("no", StringComparison.OrdinalIgnoreCase)
-            || t.Equals("ok", StringComparison.OrdinalIgnoreCase)
-            || t.Equals("a", StringComparison.OrdinalIgnoreCase)
-            || t.Equals("i", StringComparison.OrdinalIgnoreCase)
-            || t.Equals("to", StringComparison.OrdinalIgnoreCase);
+        var t = sample.Trim().TrimEnd('.', '!', '?', '…', '"', '\'', '”', '“', ',', ';', ':').Trim();
+        return AmbiguousShort.Contains(t);
     }
 
     private static IEnumerable<string> SplitSpeakable(string text)
@@ -212,7 +205,8 @@ public sealed class LanguageDetector : ILanguageDetector
         {
             var p = para.Trim();
             if (p.Length == 0) continue;
-            var sentences = SentenceCueSplit.Split(p)
+            var sentences = ClauseSplit.Split(p)
+                .SelectMany(x => NavSplit.Split(x))
                 .Select(x => x.Trim())
                 .Where(x => x.Length > 0)
                 .ToList();
@@ -223,31 +217,227 @@ public sealed class LanguageDetector : ILanguageDetector
             }
 
             foreach (var s in sentences)
-                yield return s;
+            {
+                foreach (var run in SplitMixedLatinRuns(s))
+                    yield return run;
+            }
         }
     }
 
-    private static readonly Regex SentenceCueSplit = new(
-        @"(?<=[.!?…。！？])\s+",
+    private static readonly Regex ClauseSplit = new(
+        @"(?<=[.!?…。！？:;])\s+",
+        RegexOptions.Compiled);
+
+    private static readonly Regex NavSplit = new(
+        @"\s*[·•/|]\s*",
         RegexOptions.Compiled);
 
     private static readonly Regex WordSplit = new(
         @"[^\p{L}]+",
         RegexOptions.Compiled);
 
-    private static (string? Best, int BestScore, int SecondScore) ScoreCueWords(string sample)
+    private static readonly Regex TokenSplit = new(
+        @"\S+\s*",
+        RegexOptions.Compiled);
+
+    // ó/Ó is Spanish too (llegó, sonrió) — never treat it as Polish-only.
+    private const string UniquePolishChars = "ąćęłńśźżĄĆĘŁŃŚŹŻ";
+
+    private static IEnumerable<string> SplitMixedLatinRuns(string sentence)
+    {
+        var tokens = TokenSplit.Matches(sentence);
+        if (tokens.Count <= 1)
+        {
+            yield return sentence;
+            yield break;
+        }
+
+        var langs = new string[tokens.Count];
+        var distinct = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var letters = WordSplit.Split(tokens[i].Value)
+                .FirstOrDefault(x => x.Length > 0) ?? string.Empty;
+            var lang = DetectWordLanguage(letters);
+            langs[i] = lang ?? string.Empty;
+            if (lang is not null)
+                distinct.Add(lang);
+        }
+
+        CollapseSingletonCueIslands(tokens, langs);
+        distinct.Clear();
+        foreach (var lang in langs)
+        {
+            if (lang.Length > 0)
+                distinct.Add(lang);
+        }
+
+        if (distinct.Count < 2)
+        {
+            yield return sentence;
+            yield break;
+        }
+
+        string? last = null;
+        for (var i = 0; i < langs.Length; i++)
+        {
+            if (langs[i].Length > 0) last = langs[i];
+            else if (last is not null) langs[i] = last;
+        }
+
+        last = null;
+        for (var i = langs.Length - 1; i >= 0; i--)
+        {
+            if (langs[i].Length > 0) last = langs[i];
+            else if (last is not null) langs[i] = last;
+        }
+
+        var sb = new StringBuilder();
+        var run = langs[0];
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            if (langs[i] != run && sb.Length > 0)
+            {
+                var piece = sb.ToString().Trim();
+                if (piece.Length > 0) yield return piece;
+                sb.Clear();
+                run = langs[i];
+            }
+
+            sb.Append(tokens[i].Value);
+        }
+
+        var tail = sb.ToString().Trim();
+        if (tail.Length > 0) yield return tail;
+    }
+
+    /// <summary>
+    /// A lone cue-word (hat/die/do) must not split a sentence. Unique letters (ł, ñ, ß) still may.
+    /// </summary>
+    private static void CollapseSingletonCueIslands(MatchCollection tokens, string[] langs)
+    {
+        var n = langs.Length;
+        var i = 0;
+        while (i < n)
+        {
+            if (langs[i].Length == 0)
+            {
+                i++;
+                continue;
+            }
+
+            var j = i + 1;
+            while (j < n && langs[j] == langs[i])
+                j++;
+
+            if (j - i == 1)
+            {
+                var letters = WordSplit.Split(tokens[i].Value)
+                    .FirstOrDefault(x => x.Length > 0) ?? string.Empty;
+                string? left = null;
+                string? right = null;
+                for (var L = i - 1; L >= 0; L--)
+                {
+                    if (langs[L].Length > 0)
+                    {
+                        left = langs[L];
+                        break;
+                    }
+                }
+
+                for (var R = j; R < n; R++)
+                {
+                    if (langs[R].Length > 0)
+                    {
+                        right = langs[R];
+                        break;
+                    }
+                }
+
+                if (left is not null && right is not null && left == right && left != langs[i]
+                    && !HasStrongScriptMark(letters))
+                    langs[i] = string.Empty;
+            }
+
+            i = j;
+        }
+    }
+
+    private static bool HasStrongScriptMark(string word)
+    {
+        foreach (var rune in word.EnumerateRunes())
+        {
+            var ch = rune.ToString();
+            if (UniquePolishChars.Contains(ch, StringComparison.Ordinal))
+                return true;
+            if (ch is "ñ" or "Ñ" or "¿" or "¡" or "ß")
+                return true;
+            if ("äöüÄÖÜ".Contains(ch, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string? DetectWordLanguage(string word)
+    {
+        if (word.Length < 2 || IsAmbiguousShort(word))
+            return null;
+
+        foreach (var rune in word.EnumerateRunes())
+        {
+            var ch = rune.ToString();
+            if (UniquePolishChars.Contains(ch, StringComparison.Ordinal))
+                return "pl";
+            if (ch is "ñ" or "Ñ" or "¿" or "¡")
+                return "es";
+            if (ch is "ß")
+                return "de";
+        }
+
+        return ScoreLatinLanguage(word);
+    }
+
+    private static string? ScoreLatinLanguage(string sample)
     {
         var scores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string lang, int n)
+        {
+            if (n <= 0) return;
+            scores[lang] = scores.GetValueOrDefault(lang) + n;
+        }
+
+        foreach (var rune in sample.EnumerateRunes())
+        {
+            var ch = rune.ToString();
+            if (UniquePolishChars.Contains(ch, StringComparison.Ordinal))
+                Add("pl", 6);
+            else if (ch is "ñ" or "Ñ" or "¿" or "¡")
+                Add("es", 8);
+            else if (ch is "ß")
+                Add("de", 8);
+            else if ("äöüÄÖÜ".Contains(ch, StringComparison.Ordinal))
+                Add("de", 4);
+            else if ("çœæàâêëîïôùûÿÇŒ".Contains(ch, StringComparison.Ordinal))
+                Add("fr", 5);
+            // ó/Ó is Polish and Spanish (Powrót vs llegó) — never vote on that letter alone.
+            else if ("áéíúüÁÉÍÚ".Contains(ch, StringComparison.Ordinal))
+                Add("es", 3);
+        }
+
         foreach (var raw in WordSplit.Split(sample))
         {
             if (raw.Length < 2) continue;
-            var w = raw;
-            if (EnCue.Contains(w)) scores["en"] = scores.GetValueOrDefault("en") + 1;
-            if (PlCue.Contains(w)) scores["pl"] = scores.GetValueOrDefault("pl") + 1;
-            if (DeCue.Contains(w)) scores["de"] = scores.GetValueOrDefault("de") + 1;
-            if (EsCue.Contains(w)) scores["es"] = scores.GetValueOrDefault("es") + 1;
-            if (FrCue.Contains(w)) scores["fr"] = scores.GetValueOrDefault("fr") + 1;
+            if (AmbiguousShort.Contains(raw)) continue;
+            if (EnCue.Contains(raw)) Add("en", 3);
+            if (PlCue.Contains(raw)) Add("pl", 3);
+            if (DeCue.Contains(raw)) Add("de", 3);
+            if (EsCue.Contains(raw)) Add("es", 3);
+            if (FrCue.Contains(raw)) Add("fr", 3);
         }
+
+        if (scores.Count == 0) return null;
 
         string? best = null;
         var bestScore = 0;
@@ -266,18 +456,13 @@ public sealed class LanguageDetector : ILanguageDetector
             }
         }
 
-        return (best, bestScore, second);
-    }
-
-    private static int CountWords(string sample) =>
-        WordSplit.Split(sample).Count(w => w.Length > 0);
-
-    private static int CountLetters(string sample)
-    {
-        var n = 0;
-        foreach (var r in sample.EnumerateRunes())
-            if (Rune.IsLetter(r)) n++;
-        return n;
+        if (best is null) return null;
+        if (bestScore == second && best is "es" or "fr" && scores.GetValueOrDefault("es") == scores.GetValueOrDefault("fr"))
+            return scores.GetValueOrDefault("es") >= 3 ? "es" : best;
+        // One weak cue must not override the surrounding language (PL "do kieszeni" vs EN "do").
+        if (bestScore < 3)
+            return null;
+        return best;
     }
 
     /// <summary>Relaxed script detect for short snippets (1 CJK char is enough).</summary>
@@ -289,7 +474,6 @@ public sealed class LanguageDetector : ILanguageDetector
         var cyrillic = 0;
         var arabic = 0;
         var latin = 0;
-        var polish = 0;
         var letters = 0;
 
         foreach (var rune in sample.EnumerateRunes())
@@ -304,9 +488,6 @@ public sealed class LanguageDetector : ILanguageDetector
             {
                 letters++;
                 latin++;
-                var ch = rune.ToString();
-                if ("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ".Contains(ch, StringComparison.Ordinal))
-                    polish++;
             }
         }
 
@@ -316,8 +497,7 @@ public sealed class LanguageDetector : ILanguageDetector
         if (han > 0 && hiraKata == 0 && hangul == 0) return DetectChineseVariant(sample);
         if (cyrillic > 0 && cyrillic >= latin) return "ru";
         if (arabic > 0 && arabic >= latin) return "ar";
-        if (polish >= 1) return "pl";
-        return null;
+        return ScoreLatinLanguage(sample);
     }
 
     private static string? DetectFromText(string sample)
@@ -330,7 +510,6 @@ public sealed class LanguageDetector : ILanguageDetector
         var cyrillic = 0;
         var arabic = 0;
         var latin = 0;
-        var polish = 0;
         var letters = 0;
 
         foreach (var rune in sample.EnumerateRunes())
@@ -345,9 +524,6 @@ public sealed class LanguageDetector : ILanguageDetector
             {
                 letters++;
                 latin++;
-                var ch = rune.ToString();
-                if ("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ".Contains(ch, StringComparison.Ordinal))
-                    polish++;
             }
         }
 
@@ -358,7 +534,8 @@ public sealed class LanguageDetector : ILanguageDetector
         if (han > 12 || han > letters * 0.2) return DetectChineseVariant(sample);
         if (cyrillic > letters * 0.25) return "ru";
         if (arabic > letters * 0.25) return "ar";
-        if (polish >= 3 || polish > latin * 0.02) return "pl";
+        var latinLang = ScoreLatinLanguage(sample);
+        if (latinLang is not null) return latinLang;
         if (latin > 0) return "en";
         return null;
     }
@@ -406,7 +583,9 @@ public sealed class LanguageDetector : ILanguageDetector
         if (string.IsNullOrWhiteSpace(metadataLanguage)) return null;
         var raw = metadataLanguage.Trim().Replace('_', '-');
         if (raw.Equals("und", StringComparison.OrdinalIgnoreCase)
-            || raw.Equals("zxx", StringComparison.OrdinalIgnoreCase))
+            || raw.Equals("zxx", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("mul", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("mis", StringComparison.OrdinalIgnoreCase))
             return null;
 
         try

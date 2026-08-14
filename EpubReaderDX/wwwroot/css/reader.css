@@ -239,6 +239,7 @@ body {
 #reader-scroll {
     touch-action: pan-y;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
 }
 
 .reader-muted { color: var(--rs-muted); }
@@ -508,7 +509,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: max(72vh, 26rem);
+    min-height: max(58vh, 18rem);
     padding: 2rem 1rem;
     text-align: center;
     font-size: 0.75rem;
