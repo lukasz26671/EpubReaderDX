@@ -13,4 +13,11 @@ public class ReaderSettings
     public TextAlignOption TextAlign { get; set; } = TextAlignOption.Justify;
     public int ContentWidth { get; set; } = 42; // rem-ish: max-width in ch units roughly via rem
     public int PageMargin { get; set; } = 16; // px padding multiplier-ish
+
+    public TtsEngineKind TtsEngine { get; set; } = TtsEngineKind.Auto;
+    public double TtsRate { get; set; } = 1.0;
+    /// <summary>BCP-47 override; null/empty = auto-detect.</summary>
+    public string? TtsLanguageOverride { get; set; }
+
+    public UiLanguageKind UiLanguage { get; set; } = UiLanguageKind.Auto;
 }

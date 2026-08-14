@@ -326,11 +326,115 @@ body {
 }
 
 .chrome-hidden {
+    /* Keep content clear of Dynamic Island when chrome is tucked away */
     padding-top: var(--safe-top);
 }
 
 .we-status-toast {
+    bottom: calc(4.75rem + var(--safe-bottom, 0px));
+}
+
+.tts-dock {
+    position: absolute;
+    left: 50%;
     bottom: calc(1rem + var(--safe-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 55;
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 9999px;
+    background: #0b1220;
+    color: #f8fafc;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.42);
+    border: 1px solid rgba(248, 250, 252, 0.12);
+    max-width: calc(100vw - 1.5rem);
+    pointer-events: auto;
+}
+
+.tts-dock__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: 9999px;
+    border: 0;
+    background: rgba(255, 255, 255, 0.06);
+    color: #f8fafc;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.tts-dock__btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.tts-dock__btn:disabled {
+    opacity: 0.38;
+    cursor: default;
+}
+
+.tts-dock__btn--main {
+    width: 2.75rem;
+    height: 2.75rem;
+    background: var(--rs-accent, #2563eb);
+    color: var(--rs-accent-fg, #fff);
+}
+
+.tts-dock__btn--main:hover:not(:disabled) {
+    filter: brightness(1.08);
+    background: var(--rs-accent, #2563eb);
+}
+
+.tts-dock__glyph {
+    display: inline-block;
+    font-size: 0.95rem;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: inherit;
+    user-select: none;
+}
+
+.tts-dock__glyph--main {
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+}
+
+.tts-dock__rate {
+    min-width: 2.5rem;
+    text-align: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: #f8fafc;
+    opacity: 1;
+}
+
+.tts-dock__sep {
+    width: 1px;
+    height: 1.35rem;
+    margin: 0 0.25rem;
+    background: rgba(255, 255, 255, 0.28);
+}
+
+.tts-dock__status {
+    margin-left: 0.35rem;
+    margin-right: 0.35rem;
+    padding: 0.2rem 0.45rem;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.1);
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    color: #f8fafc;
+    white-space: nowrap;
+    max-width: min(55vw, 18rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #reader-content {
@@ -410,6 +514,7 @@ body {
 #app, #app > div { height: 100%; }
 .status-bar-safe-area { display: none; }
 
+/* Safe areas: Dynamic Island / notch / home indicator (esp. installed PWA) */
 :root {
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-right: env(safe-area-inset-right, 0px);
@@ -431,6 +536,7 @@ body {
     box-sizing: border-box;
 }
 
+/* Installed PWA / fullscreen: slightly extra top breathing room past the island */
 @media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
     :root {
         --safe-top: max(env(safe-area-inset-top, 0px), 12px);
@@ -440,6 +546,7 @@ body {
 @supports (-webkit-touch-callout: none) {
     @media (display-mode: standalone) {
         :root {
+            /* iOS home-screen web apps sometimes under-report inset near the island */
             --safe-top: max(env(safe-area-inset-top, 0px), 47px);
         }
     }
@@ -451,4 +558,25 @@ body {
     padding: 0.125rem 0.25rem;
     border-radius: 0.25rem;
     font-weight: 600;
+}
+
+#reader-content mark.tts-hl,
+mark.tts-hl {
+    background: color-mix(in srgb, var(--rs-accent, #2563eb) 22%, #fde68a 55%) !important;
+    color: inherit !important;
+    border-radius: 0.12em;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    padding: 0.05em 0.06em;
+    text-decoration: none !important;
+    box-shadow: inset 0 -0.12em 0 color-mix(in srgb, var(--rs-accent, #2563eb) 70%, transparent);
+}
+
+#reader-content mark.tts-hl-word,
+mark.tts-hl-word {
+    background: color-mix(in srgb, var(--rs-accent, #2563eb) 40%, #fbbf24 50%) !important;
+    color: inherit !important;
+    border-radius: 0.1em;
+    font-weight: inherit !important;
+    text-decoration: none !important;
 }

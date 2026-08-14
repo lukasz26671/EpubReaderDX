@@ -1,4 +1,7 @@
 @inject IReaderStateService State
+@inject ITtsController Tts
+@inject IAppLocalizer L
+@inject IJsRuntimeAccessor JsAccessor
 @inject IJSRuntime Js
 @inject NavigationManager Nav
 @implements IAsyncDisposable
@@ -6,11 +9,12 @@
 <div class="@ReaderThemeCss.BodyClasses(State.Settings.Theme) @(State.IsFullscreenChromeHidden ? "chrome-hidden" : null)"
      id="app-body"
      data-theme="@ReaderThemeCss.ThemeAttribute(State.Settings.Theme)"
+     lang="@L.Culture"
      tabindex="0">
 
     <header class="reader-chrome reader-border backdrop-blur border-b min-h-14 px-3 sm:px-4 flex items-center justify-between shrink-0 z-30 transition-all box-border">
         <div class="flex items-center gap-2 min-w-0">
-            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="Spis treści (T)" @onclick="() => State.ToggleSidebar()">
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="@L.T("app.toc")" @onclick="() => State.ToggleSidebar()">
                 <i data-lucide="menu" class="w-5 h-5"></i>
             </button>
             <div class="flex items-center gap-2 min-w-0">
@@ -20,35 +24,35 @@
                 </span>
                 <span class="hidden sm:inline opacity-30">|</span>
                 <h1 class="font-semibold truncate text-sm">
-                    @(State.Book?.Metadata.Title ?? "Nie załadowano książki")
+                    @(State.Book?.Metadata.Title ?? L.T("app.noBook"))
                 </h1>
             </div>
         </div>
 
         <div class="flex items-center gap-1 sm:gap-1.5">
-            <button type="button" class="flex items-center gap-1.5 px-3 py-1.5 reader-accent-bg rounded-lg text-xs sm:text-sm font-medium transition shadow-sm" title="Otwórz EPUB (Ctrl+O)" @onclick="OpenEpub">
+            <button type="button" class="flex items-center gap-1.5 px-3 py-1.5 reader-accent-bg rounded-lg text-xs sm:text-sm font-medium transition shadow-sm" title="@L.T("app.openTitle")" @onclick="OpenEpub">
                 <i data-lucide="upload" class="w-4 h-4"></i>
-                <span class="hidden md:inline">Otwórz</span>
+                <span class="hidden md:inline">@L.T("app.open")</span>
             </button>
-            <button type="button" class="px-2.5 py-1.5 reader-surface-2 reader-hover rounded-lg text-xs font-medium transition flex items-center gap-1" title="Demo" @onclick="LoadSample">
+            <button type="button" class="px-2.5 py-1.5 reader-surface-2 reader-hover rounded-lg text-xs font-medium transition flex items-center gap-1" title="@L.T("app.demo")" @onclick="LoadSample">
                 <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500"></i>
-                <span class="hidden lg:inline">Demo</span>
+                <span class="hidden lg:inline">@L.T("app.demo")</span>
             </button>
             <div class="h-5 w-px mx-0.5" style="background:var(--rs-border)"></div>
-            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="Wygląd" @onclick="() => State.ToggleSettings()">
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="@L.T("app.appearance")" @onclick="() => State.ToggleSettings()">
                 <i data-lucide="sliders" class="w-5 h-5"></i>
             </button>
-            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="Szukaj (/)" @onclick="() => State.ToggleSearch()">
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="@L.T("app.search")" @onclick="() => State.ToggleSearch()">
                 <i data-lucide="search" class="w-5 h-5"></i>
             </button>
-            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition relative" title="Zakładki (B)" @onclick="() => State.ToggleBookmarks()">
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition relative" title="@L.T("app.bookmarks")" @onclick="() => State.ToggleBookmarks()">
                 <i data-lucide="bookmark" class="w-5 h-5"></i>
                 @if (State.Bookmarks.Count > 0)
                 {
                     <span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style="background:var(--rs-accent)"></span>
                 }
             </button>
-            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="Info" @onclick="() => State.ToggleMetadata()">
+            <button type="button" class="p-2 rounded-lg reader-hover reader-muted transition" title="@L.T("app.info")" @onclick="() => State.ToggleMetadata()">
                 <i data-lucide="info" class="w-5 h-5"></i>
             </button>
         </div>
@@ -63,7 +67,46 @@
         <MetadataModal />
     </div>
 
-    @if (!string.IsNullOrWhiteSpace(State.StatusMessage) && !State.IsLoading)
+    @if (State.HasBook)
+    {
+        <div class="tts-dock" role="group" aria-label="TTS">
+            <button type="button" class="tts-dock__btn" title="@L.T("app.ttsSlower")" @onclick="() => AdjustTtsRateAsync(-0.1)">
+                <span class="tts-dock__glyph" aria-hidden="true">−</span>
+            </button>
+            <span class="tts-dock__rate" title="@L.T("settings.ttsRate")">@DisplayRate</span>
+            <button type="button" class="tts-dock__btn" title="@L.T("app.ttsFaster")" @onclick="() => AdjustTtsRateAsync(0.1)">
+                <span class="tts-dock__glyph" aria-hidden="true">+</span>
+            </button>
+            <span class="tts-dock__sep" aria-hidden="true"></span>
+            <button type="button" class="tts-dock__btn" title="@L.T("app.ttsBack")" disabled="@(!Tts.IsSpeaking)" @onclick="SkipTtsBackAsync">
+                <span class="tts-dock__glyph" aria-hidden="true">‹‹</span>
+            </button>
+            <button type="button" class="tts-dock__btn tts-dock__btn--main" title="@(Tts.IsSpeaking ? (Tts.IsPaused ? L.T("app.ttsResume") : L.T("app.ttsPause")) : L.T("app.ttsPlay"))" @onclick="ToggleTtsAsync">
+                <span class="tts-dock__glyph tts-dock__glyph--main" aria-hidden="true">@(Tts.IsSpeaking && !Tts.IsPaused ? "❚❚" : "▶")</span>
+            </button>
+            <button type="button" class="tts-dock__btn" title="@L.T("app.ttsForward")" disabled="@(!Tts.IsSpeaking)" @onclick="SkipTtsForwardAsync">
+                <span class="tts-dock__glyph" aria-hidden="true">››</span>
+            </button>
+            <button type="button" class="tts-dock__btn" title="@L.T("app.ttsStop")" disabled="@(!Tts.IsSpeaking)" @onclick="StopTtsAsync">
+                <span class="tts-dock__glyph" aria-hidden="true">■</span>
+            </button>
+            @if (Tts.IsSpeaking || !string.IsNullOrWhiteSpace(Tts.StatusMessage))
+            {
+                <span class="tts-dock__status">
+                    @if (Tts.IsSpeaking && Tts.ChunkCount > 0)
+                    {
+                        <text>@(Tts.CurrentChunkIndex + 1)/@Tts.ChunkCount</text>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(Tts.StatusMessage))
+                    {
+                        @Tts.StatusMessage
+                    }
+                </span>
+            }
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(State.StatusMessage) && !State.IsLoading && !Tts.IsSpeaking)
     {
         <div class="pointer-events-none absolute left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-full bg-slate-900/90 text-white text-xs shadow-lg we-status-toast">
             @State.StatusMessage
@@ -81,6 +124,8 @@
     protected override async Task OnInitializedAsync()
     {
         State.OnChange += HandleChange;
+        Tts.OnChange += HandleTtsChange;
+        L.OnChange += HandleChange;
         await State.InitializeAsync();
         await HandleLaunchIntentsAsync();
     }
@@ -89,6 +134,9 @@
     {
         if (firstRender)
         {
+            // Attach circuit/WebView JS runtime for singleton TTS (required on MAUI Hybrid).
+            JsAccessor.Attach(Js);
+
             _dotNetRef = DotNetObjectReference.Create(this);
             try
             {
@@ -102,6 +150,9 @@
 
         if (State.HasBook && State.CurrentChapterIndex != _lastChapterIndex)
         {
+            if (_lastChapterIndex >= 0)
+                await Tts.StopAsync();
+
             _lastChapterIndex = State.CurrentChapterIndex;
             try
             {
@@ -219,6 +270,12 @@
         InvokeAsync(StateHasChanged);
     }
 
+    private void HandleTtsChange()
+    {
+        _ = DismissTtsStatusLaterAsync();
+        InvokeAsync(StateHasChanged);
+    }
+
     private async Task DismissStatusLaterAsync()
     {
         var message = State.StatusMessage;
@@ -227,8 +284,71 @@
         if (State.StatusMessage == message) State.ClearStatus();
     }
 
+    private async Task DismissTtsStatusLaterAsync()
+    {
+        var message = Tts.StatusMessage;
+        if (string.IsNullOrWhiteSpace(message) || Tts.IsSpeaking) return;
+        await Task.Delay(2200);
+    }
+
     private Task OpenEpub() => State.PickAndOpenAsync();
     private Task LoadSample() => State.LoadSampleAsync();
+
+    private string DisplayRate
+    {
+        get
+        {
+            var rate = Tts.IsSpeaking ? Tts.Rate : State.Settings.TtsRate;
+            return rate.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "×";
+        }
+    }
+
+    private async Task AdjustTtsRateAsync(double delta)
+    {
+        var current = Tts.IsSpeaking ? Tts.Rate : State.Settings.TtsRate;
+        var next = Math.Clamp(Math.Round((current + delta) * 10) / 10.0, 0.5, 2.0);
+
+        var s = new ReaderSettings
+        {
+            Theme = State.Settings.Theme,
+            FontFamily = State.Settings.FontFamily,
+            FontSize = State.Settings.FontSize,
+            LineHeight = State.Settings.LineHeight,
+            LetterSpacing = State.Settings.LetterSpacing,
+            ParagraphSpacing = State.Settings.ParagraphSpacing,
+            TextAlign = State.Settings.TextAlign,
+            ContentWidth = State.Settings.ContentWidth,
+            PageMargin = State.Settings.PageMargin,
+            TtsEngine = State.Settings.TtsEngine,
+            TtsRate = next,
+            TtsLanguageOverride = State.Settings.TtsLanguageOverride,
+            UiLanguage = State.Settings.UiLanguage
+        };
+        await State.UpdateSettingsAsync(s);
+        await Tts.SetRateAsync(next);
+    }
+
+    private async Task ToggleTtsAsync()
+    {
+        if (!State.HasBook || State.CurrentChapter is null) return;
+
+        if (Tts.IsSpeaking)
+        {
+            await Tts.TogglePlayPauseAsync();
+            return;
+        }
+
+        await Tts.PlayChapterAsync(
+            State.CurrentChapter.PlainText,
+            State.Book?.Metadata.Language,
+            State.Settings.TtsEngine,
+            State.Settings.TtsRate,
+            State.Settings.TtsLanguageOverride);
+    }
+
+    private Task StopTtsAsync() => Tts.StopAsync();
+    private Task SkipTtsForwardAsync() => Tts.SkipForwardAsync();
+    private Task SkipTtsBackAsync() => Tts.SkipBackAsync();
 
     [JSInvokable]
     public Task OnDropZoneChanged(bool visible)
@@ -335,6 +455,16 @@
             case "S":
                 State.ToggleSettings();
                 break;
+            case "r":
+            case "R":
+                await ToggleTtsAsync();
+                break;
+            case "[":
+                if (Tts.IsSpeaking) await Tts.SkipBackAsync();
+                break;
+            case "]":
+                if (Tts.IsSpeaking) await Tts.SkipForwardAsync();
+                break;
             case "Home":
                 State.GoToChapter(0);
                 break;
@@ -362,6 +492,10 @@
     public async ValueTask DisposeAsync()
     {
         State.OnChange -= HandleChange;
+        Tts.OnChange -= HandleTtsChange;
+        L.OnChange -= HandleChange;
+        JsAccessor.Detach(Js);
+        try { await Tts.StopAsync(); } catch { }
         try { await Js.InvokeVoidAsync("epubReaderUi.unbind"); } catch { }
         _dotNetRef?.Dispose();
     }

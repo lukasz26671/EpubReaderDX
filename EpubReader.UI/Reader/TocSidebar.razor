@@ -1,4 +1,5 @@
 @inject IReaderStateService State
+@inject IAppLocalizer L
 @inject IJSRuntime Js
 @using EpubReader.Domain.Entities
 @implements IDisposable
@@ -9,9 +10,9 @@
             <div class="flex items-center justify-between">
                 <h2 class="font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
                     <i data-lucide="list-tree" class="w-4 h-4" style="color:var(--rs-accent)"></i>
-                    Spis Treści
+                    @L.T("toc.title")
                 </h2>
-                <button type="button" class="p-1.5 reader-muted reader-hover rounded-lg" @onclick="() => State.SetSidebarOpen(false)" title="Ukryj (T)">
+                <button type="button" class="p-1.5 reader-muted reader-hover rounded-lg" @onclick="() => State.SetSidebarOpen(false)" title="@L.T("toc.hide")">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -20,13 +21,13 @@
                 <input type="search"
                        value="@State.TocFilter"
                        @oninput="OnFilter"
-                       placeholder="Filtruj rozdziały…"
+                       placeholder="@L.T("toc.filter")"
                        class="w-full pl-8 pr-3 py-2 rounded-xl reader-surface-2 reader-border border text-xs focus:outline-none focus:ring-2"
                        style="color:var(--rs-text); --tw-ring-color:var(--rs-accent)" />
             </div>
             @if (State.HasBook)
             {
-                <p class="text-[10px] reader-muted">@State.Book!.Chapters.Count rozdziałów · TOC @(CountToc(State.Book.TableOfContents))</p>
+                <p class="text-[10px] reader-muted">@L.T("toc.chapters", State.Book!.Chapters.Count, CountToc(State.Book.TableOfContents))</p>
             }
         </div>
 
@@ -34,7 +35,7 @@
             @if (!State.HasBook)
             {
                 <div class="text-center py-8 reader-muted text-xs px-4">
-                    Załaduj plik EPUB, aby zobaczyć nawigację.
+                    @L.T("toc.empty")
                 </div>
             }
             else if (State.Book!.TableOfContents.Count > 0)
@@ -64,7 +65,7 @@
 
         <div class="p-4 reader-border border-t reader-surface-2 shrink-0">
             <div class="flex justify-between text-xs reader-muted mb-1.5 font-medium">
-                <span>Postęp</span>
+                <span>@L.T("toc.progress")</span>
                 <span>@State.ProgressPercent%</span>
             </div>
             <div class="w-full h-2 rounded-full overflow-hidden" style="background:var(--rs-border)">
@@ -81,7 +82,11 @@
 @code {
     private int _lastScrolledChapter = -1;
 
-    protected override void OnInitialized() => State.OnChange += HandleChange;
+    protected override void OnInitialized()
+    {
+        State.OnChange += HandleChange;
+        L.OnChange += HandleChange;
+    }
 
     private void HandleChange() => InvokeAsync(StateHasChanged);
 
@@ -98,7 +103,11 @@
         catch { }
     }
 
-    public void Dispose() => State.OnChange -= HandleChange;
+    public void Dispose()
+    {
+        State.OnChange -= HandleChange;
+        L.OnChange -= HandleChange;
+    }
 
     private ICollection<EpubChapter> FilteredChapters =>
         State.Book is null

@@ -1,4 +1,5 @@
 @inject IReaderStateService State
+@inject IAppLocalizer L
 @implements IDisposable
 
 @if (State.IsBookmarksOpen)
@@ -7,7 +8,7 @@
         <div class="flex justify-between items-center mb-3 pb-2 reader-border border-b">
             <h3 class="font-bold text-sm flex items-center gap-2">
                 <i data-lucide="bookmark" class="w-4 h-4 text-amber-500"></i>
-                Zapisane Zakładki
+                @L.T("bookmarks.title")
             </h3>
             <button type="button" class="p-1 reader-muted reader-hover rounded" @onclick="() => State.ToggleBookmarks()">
                 <i data-lucide="x" class="w-4 h-4"></i>
@@ -17,7 +18,7 @@
         <div class="flex-1 overflow-y-auto space-y-2 text-xs pr-1">
             @if (State.Bookmarks.Count == 0)
             {
-                <div class="text-center py-6 reader-muted">Brak zapisanych zakładek.</div>
+                <div class="text-center py-6 reader-muted">@L.T("bookmarks.empty")</div>
             }
             else
             {
@@ -27,7 +28,7 @@
                     <div class="p-2.5 rounded-xl reader-surface-2 flex items-center justify-between reader-hover transition">
                         <button type="button" class="truncate pr-2 text-left flex-1" @onclick="() => Jump(bookmark.ChapterIndex)">
                             <p class="font-medium truncate">@bookmark.Title</p>
-                            <span class="text-[10px] reader-muted">Rozdział @(bookmark.ChapterIndex + 1)</span>
+                            <span class="text-[10px] reader-muted">@L.T("bookmarks.chapter", bookmark.ChapterIndex + 1)</span>
                         </button>
                         <button type="button" class="reader-muted hover:text-red-500 p-1" @onclick="() => Remove(bookmark.Id)">
                             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
@@ -40,9 +41,18 @@
 }
 
 @code {
-    protected override void OnInitialized() => State.OnChange += HandleChange;
+    protected override void OnInitialized()
+    {
+        State.OnChange += HandleChange;
+        L.OnChange += HandleChange;
+    }
+
     private void HandleChange() => InvokeAsync(StateHasChanged);
-    public void Dispose() => State.OnChange -= HandleChange;
+    public void Dispose()
+    {
+        State.OnChange -= HandleChange;
+        L.OnChange -= HandleChange;
+    }
 
     private void Jump(int chapterIndex)
     {

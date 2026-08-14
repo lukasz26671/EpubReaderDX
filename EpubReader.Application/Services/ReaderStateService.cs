@@ -13,6 +13,7 @@ public sealed class ReaderStateService : IReaderStateService
     private readonly IPreferencesService _preferences;
     private readonly ISearchService _search;
     private readonly IUriLauncher _uriLauncher;
+    private readonly IAppLocalizer _l;
     private readonly BookmarkService _bookmarks;
 
     private EpubBook? _book;
@@ -29,6 +30,7 @@ public sealed class ReaderStateService : IReaderStateService
         IPreferencesService preferences,
         ISearchService search,
         IUriLauncher uriLauncher,
+        IAppLocalizer localizer,
         IBookmarkService bookmarks)
     {
         _parser = parser;
@@ -37,6 +39,7 @@ public sealed class ReaderStateService : IReaderStateService
         _preferences = preferences;
         _search = search;
         _uriLauncher = uriLauncher;
+        _l = localizer;
         _bookmarks = bookmarks as BookmarkService
             ?? throw new InvalidOperationException("IBookmarkService must be BookmarkService.");
         _bookmarks.Bind(() => CurrentChapterIndex, () => CurrentChapter?.Title);
@@ -79,6 +82,7 @@ public sealed class ReaderStateService : IReaderStateService
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         _settings = await _preferences.LoadSettingsAsync(cancellationToken);
+        await _l.InitializeAsync(_settings.UiLanguage, cancellationToken);
         Notify();
     }
 
@@ -96,7 +100,7 @@ public sealed class ReaderStateService : IReaderStateService
         {
             IsLoading = true;
             ErrorMessage = null;
-            StatusMessage = "Parsowanie EPUB…";
+            StatusMessage = _l.T("status.parsing");
             Notify();
 
             await using var buffered = new MemoryStream();
@@ -105,7 +109,7 @@ public sealed class ReaderStateService : IReaderStateService
 
             var book = await _parser.ParseAsync(buffered, sourceName, cancellationToken);
             await ApplyBookAsync(book, cancellationToken);
-            StatusMessage = $"Załadowano {book.Chapters.Count} rozdziałów";
+            StatusMessage = _l.T("status.loaded", book.Chapters.Count);
         }
         catch (Exception ex)
         {
@@ -153,7 +157,7 @@ public sealed class ReaderStateService : IReaderStateService
         if (EpubHref.IsExternal(href))
         {
             await _uriLauncher.OpenAsync(href, cancellationToken);
-            StatusMessage = "Otwarto łącze zewnętrzne";
+            StatusMessage = _l.T("status.externalLink");
             Notify();
             return;
         }
@@ -181,21 +185,23 @@ public sealed class ReaderStateService : IReaderStateService
                 || EpubHref.PathsMatch(chapter.FullPath, EpubHref.Combine(_book.OpfDirectory, resolved)))
             {
                 GoToChapter(i, fragment);
-                StatusMessage = $"Przejście: {chapter.Title}";
+                StatusMessage = _l.T("status.goto", chapter.Title);
                 Notify();
                 return;
             }
         }
 
         // Same-document fragment already handled; unresolved internal path
-        StatusMessage = "Nie znaleziono docelowego rozdziału";
+        StatusMessage = _l.T("status.chapterMissing");
         Notify();
     }
 
     public async Task ToggleCurrentBookmarkAsync(CancellationToken cancellationToken = default)
     {
         await _bookmarks.ToggleCurrentAsync(cancellationToken);
-        StatusMessage = IsCurrentChapterBookmarked ? "Dodano zakładkę" : "Usunięto zakładkę";
+        StatusMessage = IsCurrentChapterBookmarked
+            ? _l.T("status.bookmarkAdded")
+            : _l.T("status.bookmarkRemoved");
         Notify();
     }
 
@@ -232,9 +238,16 @@ public sealed class ReaderStateService : IReaderStateService
             ParagraphSpacing = Math.Clamp(settings.ParagraphSpacing, 0.4, 2.5),
             TextAlign = settings.TextAlign,
             ContentWidth = Math.Clamp(settings.ContentWidth, 28, 60),
-            PageMargin = Math.Clamp(settings.PageMargin, 8, 48)
+            PageMargin = Math.Clamp(settings.PageMargin, 8, 48),
+            TtsEngine = settings.TtsEngine,
+            TtsRate = Math.Clamp(settings.TtsRate, 0.5, 2.0),
+            TtsLanguageOverride = string.IsNullOrWhiteSpace(settings.TtsLanguageOverride)
+                ? null
+                : settings.TtsLanguageOverride.Trim(),
+            UiLanguage = settings.UiLanguage
         };
         await _preferences.SaveSettingsAsync(_settings, cancellationToken);
+        await _l.SetPreferenceAsync(_settings.UiLanguage, cancellationToken);
         Notify();
     }
 
@@ -255,7 +268,11 @@ public sealed class ReaderStateService : IReaderStateService
         ParagraphSpacing = _settings.ParagraphSpacing,
         TextAlign = _settings.TextAlign,
         ContentWidth = _settings.ContentWidth,
-        PageMargin = _settings.PageMargin
+        PageMargin = _settings.PageMargin,
+        TtsEngine = _settings.TtsEngine,
+        TtsRate = _settings.TtsRate,
+        TtsLanguageOverride = _settings.TtsLanguageOverride,
+        UiLanguage = _settings.UiLanguage
     };
 
     public void ToggleSidebar()

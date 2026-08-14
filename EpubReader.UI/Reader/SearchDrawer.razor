@@ -1,4 +1,5 @@
 @inject IReaderStateService State
+@inject IAppLocalizer L
 @implements IDisposable
 
 @if (State.IsSearchOpen)
@@ -7,7 +8,7 @@
         <div class="flex justify-between items-center mb-3 pb-2 reader-border border-b">
             <h3 class="font-bold text-sm flex items-center gap-2">
                 <i data-lucide="search" class="w-4 h-4" style="color:var(--rs-accent)"></i>
-                Wyszukiwanie w książce
+                @L.T("search.title")
             </h3>
             <button type="button" class="p-1 reader-muted reader-hover rounded" @onclick="() => State.ToggleSearch()">
                 <i data-lucide="x" class="w-4 h-4"></i>
@@ -15,22 +16,22 @@
         </div>
 
         <EditForm Model="_model" OnValidSubmit="RunSearch" class="flex gap-2 mb-3">
-            <InputText @bind-Value="_model.Query" placeholder="Wpisz frazę..." class="flex-1 reader-surface-2 reader-border border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2" />
-            <button type="submit" class="px-3 py-2 reader-accent-bg rounded-xl text-xs font-medium transition">Szukaj</button>
+            <InputText @bind-Value="_model.Query" placeholder="@L.T("search.placeholder")" class="flex-1 reader-surface-2 reader-border border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2" />
+            <button type="submit" class="px-3 py-2 reader-accent-bg rounded-xl text-xs font-medium transition">@L.T("search.button")</button>
         </EditForm>
 
         <div class="flex-1 overflow-y-auto space-y-2 pr-1 text-xs">
             @if (!State.HasBook)
             {
-                <div class="text-center py-6 reader-muted">Najpierw załaduj książkę.</div>
+                <div class="text-center py-6 reader-muted">@L.T("search.needBook")</div>
             }
             else if (string.IsNullOrWhiteSpace(State.SearchQuery))
             {
-                <div class="text-center py-6 reader-muted">Wpisz słowo kluczowe powyżej.</div>
+                <div class="text-center py-6 reader-muted">@L.T("search.hint")</div>
             }
             else if (State.SearchResults.Count == 0)
             {
-                <div class="text-center py-6 reader-muted">Brak wyników dla "@State.SearchQuery".</div>
+                <div class="text-center py-6 reader-muted">@L.T("search.none", State.SearchQuery)</div>
             }
             else
             {
@@ -51,9 +52,18 @@
 @code {
     private readonly SearchModel _model = new();
 
-    protected override void OnInitialized() => State.OnChange += HandleChange;
+    protected override void OnInitialized()
+    {
+        State.OnChange += HandleChange;
+        L.OnChange += HandleChange;
+    }
+
     private void HandleChange() => InvokeAsync(StateHasChanged);
-    public void Dispose() => State.OnChange -= HandleChange;
+    public void Dispose()
+    {
+        State.OnChange -= HandleChange;
+        L.OnChange -= HandleChange;
+    }
 
     private void RunSearch() => State.Search(_model.Query);
 

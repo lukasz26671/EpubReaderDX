@@ -1,4 +1,7 @@
 @inject IReaderStateService State
+@inject ITtsController Tts
+@inject ILanguageDetector LangDetect
+@inject IAppLocalizer L
 @using EpubReader.Domain.Enums
 @using EpubReader.Domain.Entities
 @implements IDisposable
@@ -9,7 +12,7 @@
         <div class="flex justify-between items-center mb-3 pb-2 reader-border border-b">
             <h3 class="font-bold text-sm flex items-center gap-2">
                 <i data-lucide="palette" class="w-4 h-4" style="color:var(--rs-accent)"></i>
-                Ustawienia Czytnika
+                @L.T("settings.title")
             </h3>
             <button type="button" class="p-1 reader-muted reader-hover rounded" @onclick="() => State.ToggleSettings()">
                 <i data-lucide="x" class="w-4 h-4"></i>
@@ -18,22 +21,31 @@
 
         <div class="settings-scroll space-y-5 text-xs">
             <div>
-                <label class="block font-medium reader-muted mb-2">Motyw</label>
+                <label class="block font-medium reader-muted mb-2">@L.T("settings.uiLanguage")</label>
+                <div class="grid grid-cols-3 gap-1.5">
+                    <button type="button" class="@UiLangClass(UiLanguageKind.Auto)" style="@UiLangStyle(UiLanguageKind.Auto)" @onclick="() => SetUiLanguage(UiLanguageKind.Auto)">@L.T("settings.uiLangAuto")</button>
+                    <button type="button" class="@UiLangClass(UiLanguageKind.English)" style="@UiLangStyle(UiLanguageKind.English)" @onclick="() => SetUiLanguage(UiLanguageKind.English)">@L.T("settings.uiLangEn")</button>
+                    <button type="button" class="@UiLangClass(UiLanguageKind.Polish)" style="@UiLangStyle(UiLanguageKind.Polish)" @onclick="() => SetUiLanguage(UiLanguageKind.Polish)">@L.T("settings.uiLangPl")</button>
+                </div>
+            </div>
+
+            <div>
+                <label class="block font-medium reader-muted mb-2">@L.T("settings.theme")</label>
                 <div class="grid grid-cols-5 gap-1.5">
                     @foreach (ReaderTheme theme in Enum.GetValues<ReaderTheme>())
                     {
                         var meta = ReaderThemeCss.ThemeMeta(theme);
                         var active = State.Settings.Theme == theme;
-                        <button type="button" class="theme-swatch-btn @(active ? "is-active" : null)" title="@meta.Label" @onclick="() => SetTheme(theme)">
+                        <button type="button" class="theme-swatch-btn @(active ? "is-active" : null)" title="@ThemeLabel(theme)" @onclick="() => SetTheme(theme)">
                             <span class="theme-swatch-dot" style="@($"background:{meta.Swatch}; box-shadow: inset 0 0 0 2px {meta.Accent}")"></span>
-                            <span>@meta.Label</span>
+                            <span>@ThemeLabel(theme)</span>
                         </button>
                     }
                 </div>
             </div>
 
             <div>
-                <label class="block font-medium reader-muted mb-2">Czcionka</label>
+                <label class="block font-medium reader-muted mb-2">@L.T("settings.font")</label>
                 <div class="grid grid-cols-2 gap-2">
                     @foreach (FontFamilyOption font in Enum.GetValues<FontFamilyOption>())
                     {
@@ -51,7 +63,7 @@
 
             <div>
                 <div class="flex justify-between mb-1">
-                    <label class="font-medium reader-muted">Rozmiar tekstu</label>
+                    <label class="font-medium reader-muted">@L.T("settings.fontSize")</label>
                     <span class="reader-muted">@State.Settings.FontSize px</span>
                 </div>
                 <input type="range" min="12" max="40" value="@State.Settings.FontSize" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnFontSizeInput" />
@@ -59,7 +71,7 @@
 
             <div>
                 <div class="flex justify-between mb-1">
-                    <label class="font-medium reader-muted">Interlinia</label>
+                    <label class="font-medium reader-muted">@L.T("settings.lineHeight")</label>
                     <span class="reader-muted">@State.Settings.LineHeight.ToString("0.0")</span>
                 </div>
                 <input type="range" min="1.1" max="2.8" step="0.1" value="@State.Settings.LineHeight.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnLineHeightInput" />
@@ -67,7 +79,7 @@
 
             <div>
                 <div class="flex justify-between mb-1">
-                    <label class="font-medium reader-muted">Odstępy liter</label>
+                    <label class="font-medium reader-muted">@L.T("settings.letterSpacing")</label>
                     <span class="reader-muted">@State.Settings.LetterSpacing.ToString("0.00") em</span>
                 </div>
                 <input type="range" min="-0.05" max="0.2" step="0.01" value="@State.Settings.LetterSpacing.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnLetterSpacingInput" />
@@ -75,24 +87,24 @@
 
             <div>
                 <div class="flex justify-between mb-1">
-                    <label class="font-medium reader-muted">Odstęp akapitów</label>
+                    <label class="font-medium reader-muted">@L.T("settings.paragraphSpacing")</label>
                     <span class="reader-muted">@State.Settings.ParagraphSpacing.ToString("0.0")</span>
                 </div>
                 <input type="range" min="0.4" max="2.5" step="0.1" value="@State.Settings.ParagraphSpacing.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnParagraphSpacingInput" />
             </div>
 
             <div>
-                <label class="block font-medium reader-muted mb-2">Wyrównanie</label>
+                <label class="block font-medium reader-muted mb-2">@L.T("settings.align")</label>
                 <div class="grid grid-cols-3 gap-2">
-                    <button type="button" class="@AlignClass(TextAlignOption.Left)" style="@AlignStyle(TextAlignOption.Left)" @onclick="() => SetAlign(TextAlignOption.Left)">Do lewej</button>
-                    <button type="button" class="@AlignClass(TextAlignOption.Justify)" style="@AlignStyle(TextAlignOption.Justify)" @onclick="() => SetAlign(TextAlignOption.Justify)">Justuj</button>
-                    <button type="button" class="@AlignClass(TextAlignOption.Center)" style="@AlignStyle(TextAlignOption.Center)" @onclick="() => SetAlign(TextAlignOption.Center)">Środek</button>
+                    <button type="button" class="@AlignClass(TextAlignOption.Left)" style="@AlignStyle(TextAlignOption.Left)" @onclick="() => SetAlign(TextAlignOption.Left)">@L.T("settings.alignLeft")</button>
+                    <button type="button" class="@AlignClass(TextAlignOption.Justify)" style="@AlignStyle(TextAlignOption.Justify)" @onclick="() => SetAlign(TextAlignOption.Justify)">@L.T("settings.alignJustify")</button>
+                    <button type="button" class="@AlignClass(TextAlignOption.Center)" style="@AlignStyle(TextAlignOption.Center)" @onclick="() => SetAlign(TextAlignOption.Center)">@L.T("settings.alignCenter")</button>
                 </div>
             </div>
 
             <div>
                 <div class="flex justify-between mb-1">
-                    <label class="font-medium reader-muted">Szerokość kolumny</label>
+                    <label class="font-medium reader-muted">@L.T("settings.width")</label>
                     <span class="reader-muted">@State.Settings.ContentWidth rem</span>
                 </div>
                 <input type="range" min="28" max="60" value="@State.Settings.ContentWidth" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnWidthInput" />
@@ -100,19 +112,102 @@
 
             <div>
                 <div class="flex justify-between mb-1">
-                    <label class="font-medium reader-muted">Margines strony</label>
+                    <label class="font-medium reader-muted">@L.T("settings.margin")</label>
                     <span class="reader-muted">@State.Settings.PageMargin px</span>
                 </div>
                 <input type="range" min="8" max="48" value="@State.Settings.PageMargin" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnMarginInput" />
+            </div>
+
+            <div class="pt-2 reader-border border-t space-y-3">
+                <div class="flex items-center justify-between gap-2">
+                    <label class="font-medium reader-muted flex items-center gap-1.5">
+                        <i data-lucide="volume-2" class="w-3.5 h-3.5"></i>
+                        @L.T("settings.tts")
+                    </label>
+                    <span class="reader-muted">@DetectedLangLabel</span>
+                </div>
+
+                <div>
+                    <label class="block font-medium reader-muted mb-2">@L.T("settings.ttsEngine")</label>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        <button type="button" class="@TtsEngineClass(TtsEngineKind.Auto)" style="@TtsEngineStyle(TtsEngineKind.Auto)" @onclick="() => SetTtsEngine(TtsEngineKind.Auto)">Auto</button>
+                        <button type="button" class="@TtsEngineClass(TtsEngineKind.System)" style="@TtsEngineStyle(TtsEngineKind.System)" @onclick="() => SetTtsEngine(TtsEngineKind.System)">System</button>
+                        <button type="button" class="@TtsEngineClass(TtsEngineKind.EdgeNeural)" style="@TtsEngineStyle(TtsEngineKind.EdgeNeural)" title="Online / best effort" @onclick="() => SetTtsEngine(TtsEngineKind.EdgeNeural)">Edge</button>
+                    </div>
+                    <p class="mt-1.5 reader-muted opacity-80 leading-snug">@L.T("settings.ttsEngineHint")</p>
+                </div>
+
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <label class="font-medium reader-muted">@L.T("settings.ttsRate")</label>
+                        <span class="reader-muted">@State.Settings.TtsRate.ToString("0.0")×</span>
+                    </div>
+                    <input type="range" min="0.5" max="2.0" step="0.1" value="@State.Settings.TtsRate.ToString(System.Globalization.CultureInfo.InvariantCulture)" class="w-full" style="accent-color:var(--rs-accent)" @oninput="OnTtsRateInput" />
+                </div>
+
+                <div>
+                    <label class="block font-medium reader-muted mb-1.5">@L.T("settings.ttsVoiceLang")</label>
+                    <select class="w-full rounded-lg border px-2 py-1.5 reader-surface-2" style="border-color:var(--rs-border); background:var(--rs-surface); color:inherit"
+                            value="@(State.Settings.TtsLanguageOverride ?? "")"
+                            @onchange="OnTtsLanguageChange">
+                        <option value="">@L.T("settings.ttsLangAuto")</option>
+                        <option value="pl">Polski (pl)</option>
+                        <option value="en">English (en)</option>
+                        <option value="zh-CN">中文简体 (zh-CN)</option>
+                        <option value="zh-TW">中文繁體 (zh-TW)</option>
+                        <option value="ja">日本語 (ja)</option>
+                        <option value="ko">한국어 (ko)</option>
+                        <option value="de">Deutsch (de)</option>
+                        <option value="fr">Français (fr)</option>
+                        <option value="es">Español (es)</option>
+                        <option value="ru">Русский (ru)</option>
+                    </select>
+                </div>
             </div>
         </div>
     </div>
 }
 
 @code {
-    protected override void OnInitialized() => State.OnChange += HandleChange;
+    protected override void OnInitialized()
+    {
+        State.OnChange += HandleChange;
+        Tts.OnChange += HandleChange;
+        L.OnChange += HandleChange;
+    }
+
     private void HandleChange() => InvokeAsync(StateHasChanged);
-    public void Dispose() => State.OnChange -= HandleChange;
+    public void Dispose()
+    {
+        State.OnChange -= HandleChange;
+        Tts.OnChange -= HandleChange;
+        L.OnChange -= HandleChange;
+    }
+
+    private string DetectedLangLabel
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(Tts.DetectedLanguage))
+                return Tts.DetectedLanguage;
+            if (State.CurrentChapter is null) return "—";
+            return LangDetect.Detect(State.Book?.Metadata.Language, State.CurrentChapter.PlainText);
+        }
+    }
+
+    private string ThemeLabel(ReaderTheme theme) => theme switch
+    {
+        ReaderTheme.Sepia => L.T("theme.sepia"),
+        ReaderTheme.Paper => L.T("theme.paper"),
+        ReaderTheme.Dark => L.T("theme.dark"),
+        ReaderTheme.Nord => L.T("theme.nord"),
+        ReaderTheme.Forest => L.T("theme.forest"),
+        ReaderTheme.Rose => L.T("theme.rose"),
+        ReaderTheme.Midnight => L.T("theme.midnight"),
+        ReaderTheme.Solarized => L.T("theme.solarized"),
+        ReaderTheme.Oled => L.T("theme.oled"),
+        _ => L.T("theme.light")
+    };
 
     private Task SetTheme(ReaderTheme theme)
     {
@@ -132,6 +227,20 @@
     {
         var s = CloneSettings();
         s.TextAlign = align;
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private Task SetTtsEngine(TtsEngineKind engine)
+    {
+        var s = CloneSettings();
+        s.TtsEngine = engine;
+        return State.UpdateSettingsAsync(s);
+    }
+
+    private Task SetUiLanguage(UiLanguageKind lang)
+    {
+        var s = CloneSettings();
+        s.UiLanguage = lang;
         return State.UpdateSettingsAsync(s);
     }
 
@@ -155,12 +264,41 @@
             ? "border-color:var(--rs-accent); background:var(--rs-active); color:var(--rs-active-text)"
             : "border-color:var(--rs-border)";
 
+    private string TtsEngineClass(TtsEngineKind engine) =>
+        State.Settings.TtsEngine == engine
+            ? "p-2 rounded-xl border-2 font-medium"
+            : "p-2 rounded-xl border reader-surface-2 reader-hover";
+
+    private string TtsEngineStyle(TtsEngineKind engine) =>
+        State.Settings.TtsEngine == engine
+            ? "border-color:var(--rs-accent); background:var(--rs-active); color:var(--rs-active-text)"
+            : "border-color:var(--rs-border)";
+
+    private string UiLangClass(UiLanguageKind lang) =>
+        State.Settings.UiLanguage == lang
+            ? "p-2 rounded-xl border-2 font-medium"
+            : "p-2 rounded-xl border reader-surface-2 reader-hover";
+
+    private string UiLangStyle(UiLanguageKind lang) =>
+        State.Settings.UiLanguage == lang
+            ? "border-color:var(--rs-accent); background:var(--rs-active); color:var(--rs-active-text)"
+            : "border-color:var(--rs-border)";
+
     private Task OnFontSizeInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.FontSize = (int)v);
     private Task OnLineHeightInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.LineHeight = v);
     private Task OnLetterSpacingInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.LetterSpacing = v);
     private Task OnParagraphSpacingInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.ParagraphSpacing = v);
     private Task OnWidthInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.ContentWidth = (int)v);
     private Task OnMarginInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.PageMargin = (int)v);
+    private Task OnTtsRateInput(ChangeEventArgs e) => UpdateNumber(e, (s, v) => s.TtsRate = v);
+
+    private Task OnTtsLanguageChange(ChangeEventArgs e)
+    {
+        var s = CloneSettings();
+        var v = e.Value?.ToString();
+        s.TtsLanguageOverride = string.IsNullOrWhiteSpace(v) ? null : v;
+        return State.UpdateSettingsAsync(s);
+    }
 
     private Task UpdateNumber(ChangeEventArgs e, Action<ReaderSettings, double> apply)
     {
@@ -182,6 +320,10 @@
         ParagraphSpacing = State.Settings.ParagraphSpacing,
         TextAlign = State.Settings.TextAlign,
         ContentWidth = State.Settings.ContentWidth,
-        PageMargin = State.Settings.PageMargin
+        PageMargin = State.Settings.PageMargin,
+        TtsEngine = State.Settings.TtsEngine,
+        TtsRate = State.Settings.TtsRate,
+        TtsLanguageOverride = State.Settings.TtsLanguageOverride,
+        UiLanguage = State.Settings.UiLanguage
     };
 }

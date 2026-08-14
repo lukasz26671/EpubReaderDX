@@ -13,6 +13,10 @@ public static class DependencyInjection
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IBookmarkService, BookmarkService>();
         services.AddSingleton<IReaderStateService, ReaderStateService>();
+        services.AddSingleton<ILanguageDetector, LanguageDetector>();
+        services.AddSingleton<IAppLocalizer, AppLocalizer>();
+        services.AddSingleton<IJsRuntimeAccessor, JsRuntimeAccessor>();
+        services.AddSingleton<ITtsController, TtsController>();
         return services;
     }
 }

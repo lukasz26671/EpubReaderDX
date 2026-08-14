@@ -1,4 +1,4 @@
-﻿using EpubReader.Application;
+using EpubReader.Application;
 using EpubReader.Application.Interfaces;
 using EpubReader.Infrastructure;
 using EpubReaderDX.Services;
@@ -24,6 +24,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<IFilePickerService, MauiFilePickerService>();
         builder.Services.AddSingleton<IPreferencesService, LocalPreferencesService>();
         builder.Services.AddSingleton<IUriLauncher, MauiUriLauncher>();
+        builder.Services.AddSingleton<ISystemLocaleProvider, MauiSystemLocaleProvider>();
+        builder.Services.AddSingleton<ITtsEngine, EpubReader.Infrastructure.Tts.SystemTtsEngine>();
+        builder.Services.AddSingleton<ITtsEngine, EpubReader.Infrastructure.Tts.EdgeNeuralTtsEngine>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

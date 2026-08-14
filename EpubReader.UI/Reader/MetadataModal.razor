@@ -1,4 +1,5 @@
 @inject IReaderStateService State
+@inject IAppLocalizer L
 @implements IDisposable
 
 @if (State.IsMetadataOpen)
@@ -11,45 +12,45 @@
 
             <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
                 <i data-lucide="book-marked" class="w-5 h-5" style="color:var(--rs-accent)"></i>
-                Informacje o publikacji
+                @L.T("meta.infoTitle")
             </h3>
 
             @if (!string.IsNullOrWhiteSpace(State.Book?.CoverDataUri))
             {
-                <img src="@State.Book!.CoverDataUri" alt="Okładka" class="w-28 h-auto rounded-lg shadow mb-4 mx-auto object-cover" />
+                <img src="@State.Book!.CoverDataUri" alt="@L.T("meta.cover")" class="w-28 h-auto rounded-lg shadow mb-4 mx-auto object-cover" />
             }
 
             <div class="space-y-3 text-xs">
                 <div>
-                    <span class="reader-muted block">Tytuł</span>
+                    <span class="reader-muted block">@L.T("meta.title")</span>
                     <p class="font-semibold text-sm">@(State.Book?.Metadata.Title ?? "-")</p>
                 </div>
                 <div>
-                    <span class="reader-muted block">Autor</span>
+                    <span class="reader-muted block">@L.T("meta.author")</span>
                     <p class="font-medium">@(State.Book is null || State.Book.Metadata.Authors.Count == 0 ? "-" : string.Join(", ", State.Book.Metadata.Authors))</p>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                     <div>
-                        <span class="reader-muted block">Język</span>
+                        <span class="reader-muted block">@L.T("meta.language")</span>
                         <p>@(State.Book?.Metadata.Language ?? "-")</p>
                     </div>
                     <div>
-                        <span class="reader-muted block">Wydawca</span>
-                        <p>@(string.IsNullOrWhiteSpace(State.Book?.Metadata.Publisher) ? "Brak danych" : State.Book!.Metadata.Publisher)</p>
+                        <span class="reader-muted block">@L.T("meta.publisher")</span>
+                        <p>@(string.IsNullOrWhiteSpace(State.Book?.Metadata.Publisher) ? L.T("meta.publisherNone") : State.Book!.Metadata.Publisher)</p>
                     </div>
                 </div>
                 <div>
-                    <span class="reader-muted block">Liczba rozdziałów</span>
+                    <span class="reader-muted block">@L.T("meta.chapters")</span>
                     <p>@(State.Book?.Chapters.Count ?? 0)</p>
                 </div>
                 <div>
-                    <span class="reader-muted block">Opis</span>
+                    <span class="reader-muted block">@L.T("meta.description")</span>
                     <p class="reader-muted italic max-h-32 overflow-y-auto mt-1 p-2 reader-surface-2 rounded-lg">
-                        @(string.IsNullOrWhiteSpace(State.Book?.Metadata.Description) ? "Brak opisu." : State.Book!.Metadata.Description)
+                        @(string.IsNullOrWhiteSpace(State.Book?.Metadata.Description) ? L.T("meta.descriptionNone") : State.Book!.Metadata.Description)
                     </p>
                 </div>
                 <div class="pt-2 reader-border border-t text-[10px] reader-muted leading-relaxed">
-                    Skróty: ←/→ rozdział · J/K lub Spacja strona · T spis · / szukaj · B zakładka · F ukryj chrome · Esc zamknij
+                    @L.T("meta.shortcuts")
                 </div>
             </div>
         </div>
@@ -57,7 +58,16 @@
 }
 
 @code {
-    protected override void OnInitialized() => State.OnChange += HandleChange;
+    protected override void OnInitialized()
+    {
+        State.OnChange += HandleChange;
+        L.OnChange += HandleChange;
+    }
+
     private void HandleChange() => InvokeAsync(StateHasChanged);
-    public void Dispose() => State.OnChange -= HandleChange;
+    public void Dispose()
+    {
+        State.OnChange -= HandleChange;
+        L.OnChange -= HandleChange;
+    }
 }
