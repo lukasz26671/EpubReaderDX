@@ -58,7 +58,8 @@ jobs:
           print(f"Updated base href to {base}")
           PY
 
-          # Bust sticky HTML caches: unique comment + ensure fingerprinted CSS/JS landed
+          # Cache-bust local CSS/JS (Blazor does not fingerprint wwwroot assets reliably).
+          # Framework scripts keep their publish fingerprints; SW is network-first for html/css/js.
           python3 - "$SITE_DIR/index.html" "${{ github.sha }}" <<'PY'
           import pathlib, re, sys
           path = pathlib.Path(sys.argv[1])
@@ -68,16 +69,24 @@ jobs:
               text = text.replace("</head>", f"<!-- build:{sha} -->\n</head>", 1)
           else:
               text = re.sub(r"<!-- build:[^>]*-->", f"<!-- build:{sha} -->", text, count=1)
-          # Fail the deploy if publish left unfingerprinted local CSS/JS (would get stuck in cache).
-          bad = re.findall(r'(?:href|src)="(?:css|js)/[^"#?]+\.(?:css|js)"', text)
-          # Allow only fingerprinted forms: name.{hash}.ext OR leftover placeholder (shouldn't remain)
-          leftovers = [b for b in bad if not re.search(r'\.[A-Za-z0-9]{6,}\.(?:css|js)"$', b)]
-          if leftovers:
-              raise SystemExit(f"Unfingerprinted assets in index.html: {leftovers}")
-          path.write_text(text, encoding="utf-8")
-          print(f"Stamped build {sha}")
-          print("CSS/JS refs:")
-          for m in re.finditer(r'(?:href|src)="[^"]+\.(?:css|js)"', text):
+
+          def bust(match: re.Match[str]) -> str:
+              attr, url = match.group(1), match.group(2)
+              # Only our stable wwwroot paths — leave CDN and fingerprinted _framework alone.
+              if not re.match(r'^(css|js)/[^?"#]+\.(css|js)$', url):
+                  return match.group(0)
+              return f'{attr}="{url}?v={sha}"'
+
+          text2, n = re.subn(
+              r'((?:href|src))="([^"]+\.(?:css|js))"',
+              bust,
+              text,
+          )
+          if n < 3:
+              raise SystemExit(f"Expected to cache-bust local css/js (got {n} replacements)")
+          path.write_text(text2, encoding="utf-8")
+          print(f"Stamped build {sha}; cache-busted {n} asset URL(s)")
+          for m in re.finditer(r'(?:href|src)="(?:css|js)/[^"]+"', text2):
               print(" ", m.group(0))
           PY
 

@@ -5,8 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
-    <StaticWebAssetFingerprintingEnabled>true</StaticWebAssetFingerprintingEnabled>
-    <StaticWebAssetsFingerprintContent>true</StaticWebAssetsFingerprintContent>
+    <!-- Framework JS is fingerprinted; wwwroot css/js are cache-busted via ?v=sha in GH Pages deploy. -->
     <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
   </PropertyGroup>
 
