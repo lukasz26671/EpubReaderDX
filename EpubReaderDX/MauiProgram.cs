@@ -23,6 +23,7 @@ public static class MauiProgram
         // become separate instances per Blazor component in MAUI WebView.
         builder.Services.AddSingleton<IFilePickerService, MauiFilePickerService>();
         builder.Services.AddSingleton<IPreferencesService, LocalPreferencesService>();
+        builder.Services.AddSingleton<ILastBookStore, MauiLastBookStore>();
         builder.Services.AddSingleton<IUriLauncher, MauiUriLauncher>();
         builder.Services.AddSingleton<ISystemLocaleProvider, MauiSystemLocaleProvider>();
         builder.Services.AddSingleton<ITtsEngine, EpubReader.Infrastructure.Tts.SystemTtsEngine>();

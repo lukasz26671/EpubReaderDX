@@ -7,6 +7,80 @@ window.epubReaderPrefs = {
     }
 };
 
+/** Full last-opened EPUB in IndexedDB (not localStorage). */
+window.epubReaderLastBook = {
+    _dbPromise: null,
+    _open: function () {
+        if (this._dbPromise) return this._dbPromise;
+        var self = this;
+        this._dbPromise = new Promise(function (resolve, reject) {
+            if (!window.indexedDB) {
+                reject(new Error('IndexedDB unavailable'));
+                return;
+            }
+            var req = indexedDB.open('epubreader-lastbook', 1);
+            req.onupgradeneeded = function (e) {
+                var db = e.target.result;
+                if (!db.objectStoreNames.contains('books'))
+                    db.createObjectStore('books');
+            };
+            req.onsuccess = function (e) { resolve(e.target.result); };
+            req.onerror = function () { reject(req.error || new Error('IndexedDB open failed')); };
+        });
+        return this._dbPromise;
+    },
+    save: function (fileName, bytes) {
+        var data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+        return this._open().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction('books', 'readwrite');
+                tx.oncomplete = function () { resolve(true); };
+                tx.onerror = function () { reject(tx.error || new Error('IndexedDB save failed')); };
+                tx.objectStore('books').put({
+                    fileName: fileName || 'book.epub',
+                    data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+                    savedAt: Date.now()
+                }, 'last');
+            });
+        });
+    },
+    loadJson: function () {
+        return this._open().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction('books', 'readonly');
+                var req = tx.objectStore('books').get('last');
+                req.onerror = function () { reject(req.error || new Error('IndexedDB load failed')); };
+                req.onsuccess = function () {
+                    var v = req.result;
+                    if (!v || !v.data) {
+                        resolve(null);
+                        return;
+                    }
+                    var bytes = new Uint8Array(v.data);
+                    var chunk = 0x8000;
+                    var binary = '';
+                    for (var i = 0; i < bytes.length; i += chunk)
+                        binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+                    resolve(JSON.stringify({
+                        fileName: v.fileName || 'book.epub',
+                        base64: btoa(binary)
+                    }));
+                };
+            });
+        }).catch(function () { return null; });
+    },
+    clear: function () {
+        return this._open().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction('books', 'readwrite');
+                tx.oncomplete = function () { resolve(true); };
+                tx.onerror = function () { reject(tx.error || new Error('IndexedDB clear failed')); };
+                tx.objectStore('books').delete('last');
+            });
+        }).catch(function () { return false; });
+    }
+};
+
 window.epubReaderFile = {
     _readFile: function (file) {
         return new Promise(function (resolve) {

@@ -21,6 +21,7 @@ public static class DependencyInjection
     {
         services.AddSingleton<IFilePickerService, BrowserFilePickerService>();
         services.AddSingleton<IPreferencesService, LocalStoragePreferencesService>();
+        services.AddSingleton<ILastBookStore, IndexedDbLastBookStore>();
         services.AddSingleton<IUriLauncher, BrowserUriLauncher>();
         services.AddSingleton<ISystemLocaleProvider, BrowserSystemLocaleProvider>();
         services.AddSingleton<ITtsEngine, SystemTtsEngine>();

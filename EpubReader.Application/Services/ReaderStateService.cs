@@ -11,6 +11,7 @@ public sealed class ReaderStateService : IReaderStateService
     private readonly ISampleBookService _sampleBook;
     private readonly IFilePickerService _filePicker;
     private readonly IPreferencesService _preferences;
+    private readonly ILastBookStore _lastBook;
     private readonly ISearchService _search;
     private readonly IUriLauncher _uriLauncher;
     private readonly IAppLocalizer _l;
@@ -28,6 +29,7 @@ public sealed class ReaderStateService : IReaderStateService
         ISampleBookService sampleBook,
         IFilePickerService filePicker,
         IPreferencesService preferences,
+        ILastBookStore lastBook,
         ISearchService search,
         IUriLauncher uriLauncher,
         IAppLocalizer localizer,
@@ -37,6 +39,7 @@ public sealed class ReaderStateService : IReaderStateService
         _sampleBook = sampleBook;
         _filePicker = filePicker;
         _preferences = preferences;
+        _lastBook = lastBook;
         _search = search;
         _uriLauncher = uriLauncher;
         _l = localizer;
@@ -84,6 +87,8 @@ public sealed class ReaderStateService : IReaderStateService
         _settings = await _preferences.LoadSettingsAsync(cancellationToken);
         await _l.InitializeAsync(_settings.UiLanguage, cancellationToken);
         Notify();
+
+        await TryRestoreLastBookAsync(cancellationToken);
     }
 
     public async Task OpenFromBase64Async(string base64, string? sourceName = null, CancellationToken cancellationToken = default)
@@ -105,17 +110,66 @@ public sealed class ReaderStateService : IReaderStateService
 
             await using var buffered = new MemoryStream();
             await stream.CopyToAsync(buffered, cancellationToken);
+            var bytes = buffered.ToArray();
             buffered.Position = 0;
 
             var book = await _parser.ParseAsync(buffered, sourceName, cancellationToken);
             await ApplyBookAsync(book, cancellationToken);
             StatusMessage = _l.T("status.loaded", book.Chapters.Count);
+
+            var fileName = string.IsNullOrWhiteSpace(sourceName) ? "book.epub" : sourceName.Trim();
+            try
+            {
+                await _lastBook.SaveAsync(fileName, bytes, cancellationToken);
+            }
+            catch
+            {
+                // Opening succeeded; persistence is best-effort.
+            }
         }
         catch (Exception ex)
         {
             ErrorMessage = ex.Message;
             StatusMessage = null;
             Notify();
+        }
+        finally
+        {
+            IsLoading = false;
+            Notify();
+        }
+    }
+
+    private async Task TryRestoreLastBookAsync(CancellationToken cancellationToken)
+    {
+        LastBookBlob? last;
+        try
+        {
+            last = await _lastBook.TryLoadAsync(cancellationToken);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (last is null || last.Bytes.Length == 0) return;
+
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+            StatusMessage = _l.T("status.restoring");
+            Notify();
+
+            await using var stream = new MemoryStream(last.Bytes, writable: false);
+            var book = await _parser.ParseAsync(stream, last.FileName, cancellationToken);
+            await ApplyBookAsync(book, cancellationToken);
+            StatusMessage = _l.T("status.restored", book.Metadata.Title ?? last.FileName);
+        }
+        catch
+        {
+            try { await _lastBook.ClearAsync(cancellationToken); } catch { /* ignore */ }
+            StatusMessage = null;
         }
         finally
         {

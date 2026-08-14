@@ -121,6 +121,8 @@ internal static class Catalog
 
         ["status.parsing"] = "Parsing EPUB…",
         ["status.loaded"] = "Loaded {0} chapters",
+        ["status.restoring"] = "Restoring last book…",
+        ["status.restored"] = "Restored “{0}”",
         ["status.externalLink"] = "Opened external link",
         ["status.goto"] = "Go to: {0}",
         ["status.chapterMissing"] = "Target chapter not found",
@@ -259,6 +261,8 @@ internal static class Catalog
 
         ["status.parsing"] = "Parsowanie EPUB…",
         ["status.loaded"] = "Załadowano {0} rozdziałów",
+        ["status.restoring"] = "Przywracam ostatnią książkę…",
+        ["status.restored"] = "Przywrócono „{0}”",
         ["status.externalLink"] = "Otwarto łącze zewnętrzne",
         ["status.goto"] = "Przejście: {0}",
         ["status.chapterMissing"] = "Nie znaleziono docelowego rozdziału",
